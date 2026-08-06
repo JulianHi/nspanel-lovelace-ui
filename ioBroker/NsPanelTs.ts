@@ -1,6 +1,6 @@
 /*-----------------------------------------------------------------------
-TypeScript v5.1.1.7 zur Steuerung des SONOFF NSPanel mit dem ioBroker by @Armilar / @TT-Tom / @ticaki / @Britzelpuf / @Sternmiere / @ravenS0ne
-- abgestimmt auf TFT 61 / v5.1.1 (v5.1.2 us-p) / BerryDriver 10 / Tasmota 15.3.0
+TypeScript v5.1.1.10 zur Steuerung des SONOFF NSPanel mit dem ioBroker by @Armilar / @TT-Tom / @ticaki / @Britzelpuf / @Sternmiere / @ravenSt0ne
+- abgestimmt auf TFT 61 / v5.1.1 (v5.1.2 us-p) / BerryDriver 10 / Tasmota 15.5.0
 
 Projekt:
 https://github.com/joBr99/nspanel-lovelace-ui/tree/main/ioBroker
@@ -105,7 +105,13 @@ ReleaseNotes:
 		- 29.12.2025 - v5.1.1.4  Refactor power subscription handling in NSPanelTs (#1421 by lubepi)
 		- 29.03.2026 - v5.1.1.5  Fix DasWetter (meteored/Adapter Refactoring) and [BUG] Type at createEntity #1426
         - 31.03.2026 - v5.1.1.6  Refresh on cardPower not working in ioBroker/NsPanelTs.tst #1428 
-        - 12.04.2026 - v5.5.1.7  Sonos: speakerlist and group volume not implemented #1434 by Smokey7672
+        - 12.04.2026 - v5.1.1.7  Sonos: speakerlist and group volume not implemented #1434 by Smokey7672
+        - 24.04.2026 - v5.1.1.8  Fix DLNA Player Elapsed/Duration & Add Parameter showOnlyPlayerHeadline
+        - 25.05.2026 - v5.5.1.9  Final Fix SqueezeboxRPC-Player
+        - 06.08.2026 - v5.1.1.10 Ready for JS-Adapter 10.0.0 (TypeScript 6)
+        - 06.08.2026 - v5.1.1.10 Checking that the same NodeJS version is used as in the JS controller (previously loop via system.hosts).
+        - 06.08.2026 - v5.1.1.10 Enhancement: Use locale-aware date formats instead of parseFormat - #1429
+        - 06.08.2026 - v5.1.1.10 Enhancement: Visual grouping status for Sonos in speakerlist - #1436
 
 		
 ***************************************************************************************************************
@@ -1008,13 +1014,13 @@ export const config: Config = {
 // _________________________________ DE: Ab hier keine Konfiguration mehr _____________________________________
 // _________________________________ EN:  No more configuration from here _____________________________________
 
-const scriptVersion: string = 'v5.1.1.7';
+const scriptVersion: string = 'v5.1.1.10';
 const tft_version: string = 'v5.1.1';
 const desired_display_firmware_version = 61;
 const berry_driver_version = 10;
 
 const tasmotaOtaUrl: string = 'http://ota.tasmota.com/tasmota32/release/';
-// @ts-ignore
+
 const Icons = new IconsSelector();
 let timeoutSlider: any;
 let vwIconColor: number[] = [];
@@ -1046,7 +1052,7 @@ let checkBlindActive: boolean = false;
 
 log('--- start of NsPanelTs: ' + NSPanel_Path + ' ---', 'info');
 
-async function Init_momentjs () {
+async function Init_momentjs () : Promise<void> {
     try {
 
         moment.locale(`'${getMomentjsLocale()}'`);
@@ -1089,7 +1095,7 @@ onStop(function scriptStop () {
  * If one is not reachable, an error message is written to the log.
  * @function
  */
-async function CheckConfigParameters () {
+async function CheckConfigParameters () : Promise<void> {
     try {
         if (existsObject(config.panelRecvTopic) == false) {
             log('Config-Parameter: << config.panelRecvTopic - ' + config.panelRecvTopic + ' >> is not reachable. Please Check Parameters!', 'error');
@@ -1148,23 +1154,11 @@ async function CheckConfigParameters () {
                     setIfExists(NSPanel_Path + 'IoBroker.ScriptName', scriptName.split('.').slice(2).join('.'), null, true);
                     let jsVersion = common.version.split('.');
                     let jsV = 10 * parseInt(jsVersion[0]) + parseInt(jsVersion[1]);
-                    if (jsV < 61) log('JS-Adapter: ' + common.name + ' must be at least v6.1.3. Currently: v' + common.version, 'error');
+                    if (jsV < 93) log('JS-Adapter: ' + common.name + ' must be at least v10.0.0. Currently: v' + common.version, 'error');
                 }
             }
         });
 
-        const hostList = $('system.host.*.nodeCurrent');
-        hostList.each(function (id, i) {
-            nodeVersion = getState(id).val;
-            setIfExists(NSPanel_Path + 'IoBroker.NodeJSVersion', 'v' + nodeVersion, null, true);
-            let nodeJSVersion = getState(id).val.split('.');
-            if (parseInt(nodeJSVersion[0]) < 18) {
-                log('nodeJS must be at least v18.X.X. Currently: v' + getState(id).val + '! Please Update your System! --> iob nodejs-update 18');
-            }
-            if (parseInt(nodeJSVersion[0]) % 2 != 0) {
-                log('nodeJS does not have an even version number. An odd version number is a developer version. Please correct nodeJS version', 'info');
-            }
-        });
         if (config.mrIcon1ScreensaverEntity.ScreensaverEntity != null && existsObject(config.mrIcon1ScreensaverEntity.ScreensaverEntity) == false) {
             if (existsState(NSPanel_Path + 'Config')) log('mrIcon1ScreensaverEntity data point in the config not available - please adjust', 'warn');
         }
@@ -1183,6 +1177,54 @@ async function CheckConfigParameters () {
 }
 CheckConfigParameters();
 
+function CheckConfigNodeParameters(): void {
+    // 1. Construct the adapter path based on the current instance number (number)
+    const adapterState: string = `system.adapter.javascript.${instance}`;
+    
+    if (existsObject(adapterState)) {
+        const adapterObj = getObject(adapterState);
+        
+        // Read hostnames from the adapter object
+        const hostName: string = adapterObj && adapterObj.common && adapterObj.common.host 
+            ? adapterObj.common.host 
+            : 'Unknown';
+
+        // Read the version of the JavaScript adapter
+        const jsAdapterVersion: string = adapterObj && adapterObj.common && adapterObj.common.version
+            ? adapterObj.common.version
+            : 'Unknown';
+
+        // 2. Output log for hostname and adapter version
+        log(`[System-Info] Hostname: ${hostName}`, 'info');
+        log(`[System-Info] JavaScript-Adapter Version (javascript.${instance}): ${jsAdapterVersion}`, 'info');
+
+        // 3. Query the Node.js version using the determined hostname
+        const hostState: string = `system.host.${hostName}.nodeVersion`;
+
+        if (existsState(hostState)) {
+            const versionString: string = getState(hostState).val as string; // z.B. "v22.23.2"
+            log(`[System-Info] Node.js Version: ${versionString}`, 'info');
+
+            // 4. Extract the major version as a number
+            const majorVersion: number = parseInt(versionString.replace('v', ''), 10);
+            
+            if (majorVersion < 22) {
+                log(`nodeJS must be at least v22.X.X. Currently: ${majorVersion} ! Please Update your System! --> iob nodejs-update 22`, 'warn');
+            } else {
+                log(`System check successful. All components are ready.`, 'info');
+            }
+            if (majorVersion % 2 != 0) {
+                log('nodeJS does not have an even version number. An odd version number is a developer version. Please correct nodeJS version', 'info');
+            }
+            return;
+        }
+    }
+    
+    // Fallback in case dynamic detection fails
+    log('Error: System information could not be determined dynamically.', 'error');
+}
+CheckConfigNodeParameters();
+
 /**
  * Function to create the script information data points.
  * The function creates the data points for the script version, NodeJS version, JavaScript version and the script name.
@@ -1191,7 +1233,7 @@ CheckConfigParameters();
  * The data points are set to read only.
  * @function
  */
-async function InitIoBrokerInfo () {
+async function InitIoBrokerInfo () : Promise<void> {
     try {
         if (isSetOptionActive) {
             // Script Version
@@ -1231,7 +1273,7 @@ InitIoBrokerInfo();
  * The state is also used to set the Debug variable to true or false.
  * If an error occurs, a warning is logged.
  */
-async function CheckDebugMode () {
+async function CheckDebugMode () : Promise<void> {
     try {
         if (isSetOptionActive) {
             await createStateAsync(NSPanel_Path + 'Config.ScripgtDebugStatus', false, {type: 'boolean', write: true});
@@ -1262,7 +1304,7 @@ CheckDebugMode();
  * If the debug mode is activated, the result of the iobroker command is logged.
  * If an error occurs, a warning is logged.
  */
-async function CheckMQTTPorts () {
+async function CheckMQTTPorts () : Promise<void> {
     try {
         let instanceName: string = (config.panelRecvTopic).split('.')[0] + "." + (config.panelRecvTopic).split('.')[1];
 
@@ -1329,7 +1371,7 @@ CheckMQTTPorts();
  *
  * @since 4.4.0
  */
-async function Init_Release () {
+async function Init_Release () : Promise<void> {
     try {
         if (existsObject(NSPanel_Path + 'Display_Firmware.desiredVersion') == false) {
             await createStateAsync(NSPanel_Path + 'Display_Firmware.desiredVersion', desired_display_firmware_version, {type: 'number', write: false});
@@ -1398,7 +1440,7 @@ Init_Release();
  * - hiddenCards (socket)
  * @function InitConfigParameters
  */
-async function InitConfigParameters () {
+async function InitConfigParameters () : Promise<void> {
     try {
         if (isSetOptionActive) {
             // alternativeScreensaverLayout (socket)
@@ -1590,7 +1632,7 @@ on({id: [NSPanel_Path + 'Config.localeNumber', NSPanel_Path + 'Config.temperatur
              * List of supported locales.
              * @type {string[]}
              */
-            let localesList = [
+            let localesList: string[] = [
                 'en-US',
                 'de-DE',
                 'nl-NL',
@@ -1645,7 +1687,7 @@ on({id: [NSPanel_Path + 'Config.localeNumber', NSPanel_Path + 'Config.temperatur
              * List of supported temperature units.
              * @type {string[]}
              */
-            let tempunitList = ['°C', '°F', 'K'];
+            let tempunitList: string[] = ['°C', '°F', 'K'];
             /**
              * Update the temperature unit setting.
              */
@@ -1662,7 +1704,7 @@ on({id: [NSPanel_Path + 'Config.localeNumber', NSPanel_Path + 'Config.temperatur
  * Screensaver 1 and Screensaver 2
  * @function Init_ScreensaverAdvanced
  */
-async function Init_ScreensaverAdvanced () {
+async function Init_ScreensaverAdvanced () : Promise<void> {
     try {
         if (existsState(`${NSPanel_Path}${ScreensaverAdvancedEndPath}`) == false) {
             await createStateAsync(`${NSPanel_Path}${ScreensaverAdvancedEndPath}`, false, true, {type: 'boolean', write: true});
@@ -1681,7 +1723,7 @@ Init_ScreensaverAdvanced();
  * Checks whether setObjects() is available for the instance (true/false)
  * @returns {boolean} result of the check
  */
-function CheckEnableSetObject () {
+function CheckEnableSetObject () : boolean {
     var enableSetObject = getObject('system.adapter.javascript.' + instance).native.enableSetObject;
     return enableSetObject;
 }
@@ -1691,7 +1733,7 @@ function CheckEnableSetObject () {
  * These states are used to store the heading, type and id0 of the active page.
  * @function Init_ActivePageData
  */
-async function Init_ActivePageData () {
+async function Init_ActivePageData () : Promise<void> {
     try {
         if (existsState(NSPanel_Path + 'ActivePage.heading') == false) {
             await createStateAsync(NSPanel_Path + 'ActivePage.heading', '', true, {type: 'string', write: false});
@@ -1713,7 +1755,7 @@ Init_ActivePageData();
  * This state is used to switch between different background colors for the screensaver.
  * @function Init_Screensaver_Backckground_Color_Switch
  */
-async function Init_Screensaver_Backckground_Color_Switch () {
+async function Init_Screensaver_Backckground_Color_Switch () : Promise<void> {
     try {
         const objDef: iobJS.StateObject = {
             _id: '',
@@ -1834,7 +1876,7 @@ on({id: NSPanel_Path + 'Config.Screensaver.alternativeScreensaverLayout', change
  * @async
  * @throws {Error} If an error occurs while creating the `bExitPage` state object.
  */
-async function Init_bExit_Page_Change () {
+async function Init_bExit_Page_Change () : Promise<void>{
     try {
         alwaysOn = false;
         pageCounter = 0;
@@ -1857,7 +1899,7 @@ Init_bExit_Page_Change();
  * @async
  * @throws {Error} If an error occurs while creating the `Trigger_Dimmode` state.
  */
-async function Init_Dimmode_Trigger () {
+async function Init_Dimmode_Trigger () : Promise<void> {
     try {
         if (existsState(NSPanel_Path + 'ScreensaverInfo.Trigger_Dimmode') == false) {
             await createStateAsync(NSPanel_Path + 'ScreensaverInfo.Trigger_Dimmode', false, true, {type: 'boolean', write: true});
@@ -1878,7 +1920,7 @@ Init_Dimmode_Trigger();
  * @async
  * @throws {Error} If an error occurs while creating the state objects or aliases.
  */
-async function InitActiveBrightness () {
+async function InitActiveBrightness () : Promise<void> {
     try {
         if (isSetOptionActive) {
             if (existsState(NSPanel_Path + 'ScreensaverInfo.activeBrightness') == false || existsState(NSPanel_Path + 'ScreensaverInfo.activeDimmodeBrightness') == false) {
@@ -2019,7 +2061,7 @@ on({id: String(NSPanel_Path) + 'ScreensaverInfo.Trigger_Dimmode', change: 'ne'},
  * @async
  * @throws {Error} If an error occurs while creating the state or alias.
  */
-async function InitRebootPanel () {
+async function InitRebootPanel () : Promise<void> {
     try {
         if (existsState(NSPanel_Path + 'Config.rebootNSPanel') == false) {
             await createStateAsync(NSPanel_Path + 'Config.rebootNSPanel', false, {type: 'boolean', write: true});
@@ -2053,7 +2095,7 @@ on({id: AliasPath + 'Config.rebootNSPanel.SET', change: 'any'}, async function (
             }
             axios
                 .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                .then(async function (response) {
+                .then(async function (response: any) {
                     if (response.status === 200) {
                         SendToPanel({payload: 'pageType~pageStartup'});
                         log('Tasmota Reboot', 'info');
@@ -2064,7 +2106,7 @@ on({id: AliasPath + 'Config.rebootNSPanel.SET', change: 'any'}, async function (
                         log('Axios Status - Requesting locales: ' + response.state, 'warn');
                     }
                 })
-                .catch(function (error) {
+                .catch(function (error: any) {
                     if (error.code === 'EHOSTUNREACH') {
                         log(`Can't connect to display!`, 'warn');
                     } else log(error, 'warn');
@@ -2079,7 +2121,6 @@ on({id: AliasPath + 'Config.rebootNSPanel.SET', change: 'any'}, async function (
         }
     }
 });
-
 
 /**
  * Initializes the datapoints for the update functionality of the NSPanel.
@@ -2109,7 +2150,7 @@ on({id: AliasPath + 'Config.rebootNSPanel.SET', change: 'any'}, async function (
  *
  * @throws {Error} If an error occurs while creating the datapoints or aliases.
  */
-async function InitUpdateDatapoints () {
+async function InitUpdateDatapoints () : Promise<void> {
     try {
         if (existsState(NSPanel_Path + 'Config.Update.UpdateTasmota') == false) {
             if (isSetOptionActive) {
@@ -2190,7 +2231,7 @@ on({id: [NSPanel_Path + 'Config.Update.UpdateTasmota', NSPanel_Path + 'Config.Up
  * @async
  * @throws {Error} Logs an error message if any error occurs during the initialization.
  */
-async function Init_Relays () {
+async function Init_Relays () : Promise<void> {
     try {
         if (isSetOptionActive) {
             if (existsState(NSPanel_Path + 'Relay.1') == false || existsState(NSPanel_Path + 'Relay.2') == false) {
@@ -2226,7 +2267,7 @@ Init_Relays();
  * @async
  * @throws {Error} Logs an error message if any error occurs during the initialization.
  */
-async function InitAlternateMRIconsSize () {
+async function InitAlternateMRIconsSize () : Promise<void> {
     try {
         if (isSetOptionActive) {
             if (existsState(NSPanel_Path + 'Config.MRIcons.alternateMRIconSize.1') == false || existsState(NSPanel_Path + 'Config.MRIcons.alternateMRIconSize.2') == false) {
@@ -2269,7 +2310,7 @@ InitAlternateMRIconsSize();
  * Creates all necessary states for the dateformat settings.
  * If the user option is set, it creates the states for the weekday and month format and the corresponding aliases.
  */
-async function InitDateformat () {
+async function InitDateformat () : Promise<void> {
     try {
         if (isSetOptionActive) {
             if (
@@ -2393,14 +2434,14 @@ on({id: [String(NSPanel_Path) + 'Relay.1', String(NSPanel_Path) + 'Relay.2'], ch
 
         axios
             .get(urlString)
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(response.data, 'info');
                     }
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 if (error.code === 'EHOSTUNREACH') {
                     log(`Can't connect to display!`, 'warn');
                 } else log(error, 'warn');
@@ -2419,7 +2460,7 @@ on({id: [String(NSPanel_Path) + 'Relay.1', String(NSPanel_Path) + 'Relay.2'], ch
  *
  * @throws {Error} If an error occurs while subscribing to the MQTT entities.
  */
-async function SubscribeMRIcons () {
+async function SubscribeMRIcons () : Promise<void> {
     try {
         const mrEntities = [config.mrIcon1ScreensaverEntity, config.mrIcon2ScreensaverEntity];
         let arr: string[] = []
@@ -2452,7 +2493,7 @@ SubscribeMRIcons();
  * @async
  * @function CreateWeatherAlias
  */
-async function CreateWeatherAlias () {
+async function CreateWeatherAlias () : Promise<void> {
     try {
         if (autoCreateAlias) {
             if (weatherAdapterInstance == 'daswetter.' + weatherAdapterInstanceNumber + '.') {
@@ -2702,7 +2743,7 @@ CreateWeatherAlias();
  *
  * @returns {Promise<void>} - A Promise that resolves when the state is created and set successfully.
  */
-async function InitPageNavi () {
+async function InitPageNavi () : Promise<void> {
     try {
         if (!existsState(NSPanel_Path + 'PageNavi')) {
             await createStateAsync(NSPanel_Path + 'PageNavi', {type: 'string', write: true});
@@ -2752,7 +2793,7 @@ on({id: [NSPanel_Path + 'PageNavi'], change: 'any'}, async function (obj) {
  * @returns {void}
  * @throws {Error} If an error occurs while sending the payload to the panel.
  */
-function ScreensaverDimmode (timeDimMode: NSPanel.DimMode) {
+function ScreensaverDimmode (timeDimMode: NSPanel.DimMode) : void {
     try {
         let brightness: number = 100;
         let dimBrightness: number = -1;
@@ -2799,7 +2840,7 @@ function ScreensaverDimmode (timeDimMode: NSPanel.DimMode) {
  *
  * @returns {Promise<void>} - A Promise that resolves when the states are created and set successfully.
  */
-async function InitWeatherForecast () {
+async function InitWeatherForecast () : Promise<void> {
     try {
         if (isSetOptionActive) {
             //----Ability to choose between Accu-Weather Forecast or self-defined values in the screensaver---------------------------------
@@ -2864,7 +2905,7 @@ InitWeatherForecast();
  *
  * @returns {Promise<void>} - A Promise that resolves when the states are created and set successfully.
  */
-async function InitDimmode () {
+async function InitDimmode () : Promise<void> {
     try {
         if (isSetOptionActive) {
             // Screensaver on dark at night ("brightnessNight: e.g. 2") or off ("brightnessNight:0")
@@ -2967,7 +3008,7 @@ InitDimmode();
  * This is used to compare with the Dimmode dates.
  * @returns {Date} The current date as a Date object.
  */
-function currentDimDate () {
+function currentDimDate () : Date {
     let d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -2977,8 +3018,8 @@ function currentDimDate () {
  * @param {string} strTime - The time string to add to the current date.
  * @returns {Date} The resulting date object.
  */
-function addDimTime (strTime) {
-    let time = strTime.split(':');
+function addDimTime(strTime: string) : Date { // Expliziter Typ 'string'
+    let time: any = strTime.split(':');
     let d = currentDimDate();
     d.setHours(time[0]);
     d.setMinutes(time[1]);
@@ -2995,7 +3036,7 @@ function addDimTime (strTime) {
  * @param {string} strUpper - The upper bound of the range.
  * @returns {boolean} true if the current time is within the range, false otherwise.
  */
-function isDimTimeInRange (strLower, strUpper) {
+function isDimTimeInRange (strLower: any, strUpper: any) : boolean {
     let now = new Date();
     let lower = addDimTime(strLower);
     let upper = addDimTime(strUpper);
@@ -3021,13 +3062,13 @@ function isDimTimeInRange (strLower, strUpper) {
  * @param {number|undefined} [Relays] - The number of relays that are currently on. If undefined, it is assumed to be 0.
  * @returns {number|undefined} The calculated consumption in Watts, or undefined if an error occurs.
  */
-async function Calc_Consumption (Brightness: number, Relays: number | undefined) {
+async function Calc_Consumption (Brightness: number, Relays: number | undefined) : Promise<number> {
     try {
         if (Relays == undefined) Relays = 0;
         return parseFloat((Relays * 0.25 + (0.0086 * Brightness + 0.7429)).toFixed(2));
     } catch (err: any) {
         log('error at function Calc_Consumption: ' + err.message, 'warn');
-        return undefined
+        return 0; // HIER FIX: Gültige Zahl statt undefined zurückgeben
     }
 }
 
@@ -3063,7 +3104,7 @@ async function CountRelaysOn (Path: string): Promise<number> {
  * @param {string} Path - The path to the Dimmode settings and the ScreensaverInfo state.
  * @returns {Promise<number|undefined>} The current brightness or undefined if an error occurs.
  */
-async function DetermineDimBrightness (Path: string) {
+async function DetermineDimBrightness (Path: string) : Promise<any> {
     if (existsState(NSPanel_Path + 'NSPanel_Dimmode_hourDay') &&
         existsState(NSPanel_Path + 'NSPanel_Dimmode_hourNight') &&
         existsState(NSPanel_Path + 'NSPanel_Dimmode_brightnessDay') &&
@@ -3131,7 +3172,7 @@ async function DetermineScreensaverDimmode (timeDimMode: NSPanel.DimMode): Promi
  * @returns {Promise<void>} A promise that resolves when the initialization is complete.
  * @throws {Error} If an error occurs during initialization.
  */
-async function InitMeanPowerConsumption () {
+async function InitMeanPowerConsumption () : Promise<void> {
     try {
         const meanPower = NSPanel_Path + 'Consumption.MeanPower';
         let meanConsumption: number | undefined = await Calc_Consumption(await DetermineDimBrightness(NSPanel_Path), await CountRelaysOn(NSPanel_Path));
@@ -3165,9 +3206,8 @@ InitMeanPowerConsumption();
  *
  * @event
  */
-on(
-    {
-        id: []
+on({
+    id: (<string[]>[]) // Expliziter Typ 'string[]' für das leere Array
             .concat(NSPanel_Path + 'NSPanel_Dimmode_brightnessDay')
             .concat(NSPanel_Path + 'NSPanel_Dimmode_brightnessNight')
             .concat(NSPanel_Path + 'ScreensaverInfo.activeBrightness')
@@ -3217,7 +3257,7 @@ const popupNotifyBuzzer = NSPanel_Path + 'popupNotify.popupNotifyBuzzer'; // 1,1
  * @returns {Promise<void>} A promise that resolves when the initialization is complete.
  * @throws {Error} If an error occurs during initialization.
  */
-async function InitPopupNotify () {
+async function InitPopupNotify () : Promise<void> {
     try {
         if (!existsState(screensaverNotifyHeading)) {
             await createStateAsync(screensaverNotifyHeading, {type: 'string', write: true});
@@ -3339,14 +3379,14 @@ async function InitPopupNotify () {
 
                 axios
                     .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                    .then(async function (response) {
+                    .then(async function (response: any) {
                         if (response.status === 200) {
                             log('Axios Data: ' + JSON.stringify(response.data), 'info');
                         } else {
                             log('Axios Status - Tasmota Buzzer: ' + response.state, 'warn');
                         }
                     })
-                    .catch(function (error) {
+                    .catch(function (error: any) {
                         if (error.code === 'EHOSTUNREACH') {
                             log(`Can't connect to display!`, 'warn');
                         } else log(error, 'warn');
@@ -3379,7 +3419,7 @@ let activePage: PageType | undefined = undefined;
  * @constant
  * @type {Object}
  */
-let scheduleSendTime = adapterSchedule(new Date().setSeconds(0, 0), 60, () => {
+let scheduleSendTime: any = adapterSchedule(new Date().setSeconds(0, 0), 60, () => {
     try {
         SendTime();
         HandleScreensaverUpdate();
@@ -3389,7 +3429,7 @@ let scheduleSendTime = adapterSchedule(new Date().setSeconds(0, 0), 60, () => {
 });
 
 //Switch between Screensaver Entities and WeatherForecast
-let screensaverChangeTime = 60;
+let screensaverChangeTime: any = 60;
 if (existsState(NSPanel_Path + 'ScreensaverInfo.entityChangeTime')) {
     screensaverChangeTime = parseInt(getState(NSPanel_Path + 'ScreensaverInfo.entityChangeTime').val);
 }
@@ -3405,7 +3445,7 @@ if (existsState(NSPanel_Path + 'ScreensaverInfo.entityChangeTime')) {
  * @constant
  * @type {Object}
  */
-let scheduleSwichScreensaver = adapterSchedule(undefined, screensaverChangeTime, () => {
+let scheduleSwichScreensaver: any = adapterSchedule(undefined, screensaverChangeTime, () => {
     try {
         // WeatherForecast true/false Switchover delayed
         let heading: string = '';
@@ -3448,10 +3488,11 @@ let scheduleSwichScreensaver = adapterSchedule(undefined, screensaverChangeTime,
     }
 });
 
-function InitHWButton1Color () {
+function InitHWButton1Color (): void {
     try {
-        if ([null, undefined, ''].indexOf(config.mrIcon1ScreensaverEntity.ScreensaverEntity) == -1) {
-            on({id: config.mrIcon1ScreensaverEntity.ScreensaverEntity, change: 'ne'}, async function () {
+        const entityId = config.mrIcon1ScreensaverEntity.ScreensaverEntity;
+        if (typeof entityId === 'string' && entityId !== '') { // <--- Prüfen, ob es ein String ist
+            on({id: entityId, change: 'ne'}, async function () {
                 HandleScreensaverUpdate();
             });
         }
@@ -3476,10 +3517,11 @@ InitHWButton1Color();
  *
  * @throws Will log a warning message if an error occurs during execution.
  */
-function InitHWButton2Color () {
+function InitHWButton2Color (): void {
     try {
-        if ([null, undefined, ''].indexOf(config.mrIcon2ScreensaverEntity.ScreensaverEntity) == -1) {
-            on({id: config.mrIcon2ScreensaverEntity.ScreensaverEntity, change: 'ne'}, async function () {
+        const entityId = config.mrIcon2ScreensaverEntity.ScreensaverEntity;
+        if (typeof entityId === 'string' && entityId !== '') { // <--- Prüfen, ob es ein String ist
+            on({id: entityId, change: 'ne'}, async function () {
                 HandleScreensaverUpdate();
             });
         }
@@ -3625,7 +3667,7 @@ function getMomentjsLocale (): String {
  * @returns {Promise<void>} A promise that resolves when the locales have been fetched and stored.
  * @throws {Error} If an error occurs during the request or state update.
  */
-async function get_locales () {
+async function get_locales (): Promise<void> {
     try {
         if (Debug) {
             log('Requesting locales', 'info');
@@ -3634,7 +3676,7 @@ async function get_locales () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(JSON.stringify(response.data), 'info');
@@ -3645,7 +3687,7 @@ async function get_locales () {
                     log('Axios Status - Requesting locales: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 log(error, 'warn');
             });
     } catch (err: any) {
@@ -3665,7 +3707,7 @@ async function get_locales () {
  * @returns {Promise<void>} A promise that resolves when the locales have been fetched and stored.
  * @throws {Error} If an error occurs during the request or state update.
  */
-async function get_locales_servicemenu () {
+async function get_locales_servicemenu () : Promise<void> {
     try {
         if (Debug) {
             log('Requesting locales Service Menu', 'info');
@@ -3674,7 +3716,7 @@ async function get_locales_servicemenu () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(JSON.stringify(response.data), 'info');
@@ -3685,7 +3727,7 @@ async function get_locales_servicemenu () {
                     log('Axios Status - Requesting locales Service Menu: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 log(error, 'warn');
             });
     } catch (err: any) {
@@ -3703,7 +3745,7 @@ async function get_locales_servicemenu () {
  * @returns {Promise<void>} A promise that resolves when the update check is complete.
  * @throws {Error} If an error occurs during the update check.
  */
-async function check_updates () {
+async function check_updates () : Promise<void> {
     try {
         if (Debug) log('Check-Updates', 'info');
 
@@ -3918,7 +3960,7 @@ on({id: NSPanel_Path + 'popupNotify.popupNotifyAction', change: 'any'}, async fu
  * @returns {Promise<void>} A promise that resolves when the update data has been retrieved.
  * @throws {Error} If an error occurs during the data retrieval.
  */
-async function get_panel_update_data () {
+async function get_panel_update_data () : Promise<void> {
     try {
         if (isSetOptionActive) {
             await createStateAsync(NSPanel_Path + 'Config.Update.UpdateMessage', true, {read: true, write: true, name: 'Update-Message', type: 'boolean', def: true});
@@ -3966,7 +4008,7 @@ async function get_panel_update_data () {
  * @function get_current_tasmota_ip_address
  * @returns {string} The IP address of the Tasmota device.
  */
-function get_current_tasmota_ip_address () {
+function get_current_tasmota_ip_address () : any {
     try {
         const infoObjId = config.panelRecvTopic.substring(0, config.panelRecvTopic.length - 'RESULT'.length) + 'INFO2';
         const infoObj = JSON.parse(getState(infoObjId).val);
@@ -3990,7 +4032,7 @@ function get_current_tasmota_ip_address () {
  * @returns {string} The IP address of the Tasmota device.
  * @throws {Error} If an error occurs during the IP address retrieval.
 */
-function get_online_tasmota_firmware_version () {
+function get_online_tasmota_firmware_version () : void {
     try {
         if (Debug) {
             log('Requesting tasmota firmware version', 'info');
@@ -4000,7 +4042,7 @@ function get_online_tasmota_firmware_version () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(JSON.stringify(response.data), 'info');
@@ -4023,7 +4065,7 @@ function get_online_tasmota_firmware_version () {
                     log('Axios Status - online tasmota firmware version: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 log(error, 'warn');
             });
     } catch (err: any) {
@@ -4040,7 +4082,7 @@ function get_online_tasmota_firmware_version () {
  * @returns {Promise<void>} A promise that resolves when the current Berry driver version has been retrieved.
  * @throws {Error} If an error occurs during the version retrieval.
  */
-function get_current_berry_driver_version () {
+function get_current_berry_driver_version () : void {
     try {
         if (Debug) {
             log('Requesting current berry driver version', 'info');
@@ -4050,7 +4092,7 @@ function get_current_berry_driver_version () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(JSON.stringify(response.data), 'info');
@@ -4073,9 +4115,11 @@ function get_current_berry_driver_version () {
                     log('Axios Status - current berry driver version: ' + response.state, 'info');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 if (error.code === 'EHOSTUNREACH') {
                     log(`Can't connect to display!`, 'warn');
+                } else if (error.code === 'ECONNRESET') {
+                    log(`Can't connect to current Berry-Driver`, 'warn')
                 } else log(error, 'warn');
             });
     } catch (err: any) {
@@ -4092,7 +4136,7 @@ function get_current_berry_driver_version () {
  * @returns {Promise<void>} A promise that resolves when the online Berry driver version has been retrieved.
  * @throws {Error} If an error occurs during the version retrieval.
  */
-function get_tasmota_status0 () {
+function get_tasmota_status0 () : void{
     try {
         if (Debug) {
             log('Requesting tasmota status0', 'info');
@@ -4105,7 +4149,7 @@ function get_tasmota_status0 () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(JSON.stringify(response.data), 'info');
@@ -4202,21 +4246,23 @@ function get_tasmota_status0 () {
                     log('Axios Status - get_tasmota_status0: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 if (error.code === 'EHOSTUNREACH') {
                     log(`Can't connect to display!`, 'warn');
-                } else log(error, 'error');
+                } else if (error.code === 'ECONNRESET') {
+                    log(`Can't connect to NSPanel`, 'warn')
+                } else log(error, 'warn');
             });
     } catch (err: any) {
         log('error requesting firmware in function get_tasmota_status0: ' + err.message, 'warn');
     }
 }
 
-function renameChannel () {
+function renameChannel () : void {
     const urlString = get_tasmot_url('DeviceName');
     axios
         .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-        .then(async function (response) {
+        .then(async function (response: any) {
             if (response.status === 200) {
                 if (Debug) {
                     log(JSON.stringify(response.data), 'info');
@@ -4233,7 +4279,7 @@ function renameChannel () {
                 }
             }
         })
-        .catch(function (error) {
+        .catch(function (error: any) {
             if (error.code === 'EHOSTUNREACH') {
                 log(`Can't connect to display!`, 'warn');
             } else log(error, 'error');
@@ -4261,7 +4307,7 @@ function get_tasmot_url (cmd: string): string {
  * @returns {Promise<void>} A promise that resolves when the firmware update has been completed.
  * @throws {Error} If an error occurs during the firmware update.
  */
-async function get_online_berry_driver_version () {
+async function get_online_berry_driver_version () : Promise<void> {
     try {
         if (NSPanel_Path + 'Config.Update.activ') {
             if (Debug) {
@@ -4274,7 +4320,7 @@ async function get_online_berry_driver_version () {
 
             axios
                 .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                .then(async function (response) {
+                .then(async function (response: any) {
                     if (response.status === 200) {
                         if (Debug) {
                             log(response.data, 'info');
@@ -4297,7 +4343,7 @@ async function get_online_berry_driver_version () {
                         log('Axios Status - get_online_berry_driver_version: ' + response.state, 'warn');
                     }
                 })
-                .catch(function (error) {
+                .catch(function (error: any) {
                     log(error, 'warn');
                 });
             */
@@ -4328,7 +4374,7 @@ async function get_online_berry_driver_version () {
  * @returns {Promise<void>} A promise that resolves when the Berry driver update has been completed.
  * @throws {Error} If an error occurs during the update.
  */
-function check_version_tft_firmware () {
+function check_version_tft_firmware () : void {
     try {
         if (Debug) {
             log('Requesting online TFT version', 'info');
@@ -4338,7 +4384,7 @@ function check_version_tft_firmware () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(JSON.stringify(response.data), 'info');
@@ -4354,7 +4400,7 @@ function check_version_tft_firmware () {
                     log('Axios Status - check_version_tft_firmware: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 log(error, 'warn');
             });
     } catch (err: any) {
@@ -4371,7 +4417,7 @@ function check_version_tft_firmware () {
  * @returns {Promise<void>} A promise that resolves when the display firmware update data has been retrieved.
  * @throws {Error} If an error occurs during the update data retrieval.
  */
-function check_online_display_firmware () {
+function check_online_display_firmware () : void {
     try {
         if (Debug) {
             log('Requesting online firmware version', 'info');
@@ -4381,7 +4427,7 @@ function check_online_display_firmware () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(response.data, 'info');
@@ -4397,7 +4443,7 @@ function check_online_display_firmware () {
                     log('Axios Status - check_online_display_firmware: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 log(error, 'warn');
             });
     } catch (err: any) {
@@ -4467,7 +4513,7 @@ on({id: config.panelRecvTopic}, async (obj) => {
  * @function update_berry_driver_version
  * @throws {Error} If an error occurs during the update process.
  */
-function update_berry_driver_version () {
+function update_berry_driver_version () : void {
     try {
         let urlString = `http://${get_current_tasmota_ip_address()}/cm?cmnd=Backlog UpdateDriverVersion https://raw.githubusercontent.com/ticaki/ioBroker.nspanel-lovelace-ui/refs/heads/main/tasmota/berry/${berry_driver_version}/autoexec.be; Restart 1`;
         if (tasmota_web_admin_password != '') {
@@ -4476,7 +4522,7 @@ function update_berry_driver_version () {
 
         axios
             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-            .then(async function (response) {
+            .then(async function (response: any) {
                 if (response.status === 200) {
                     if (Debug) {
                         log(response.data, 'info');
@@ -4485,7 +4531,7 @@ function update_berry_driver_version () {
                     log('Axios Status - update_berry_driver_version: ' + response.state, 'warn');
                 }
             })
-            .catch(function (error) {
+            .catch(function (error: any) {
                 log(error, 'warn');
             });
     } catch (err: any) {
@@ -4501,7 +4547,7 @@ function update_berry_driver_version () {
  * @function update_display_firmware
  * @throws {Error} If an error occurs during the firmware update.
  */
-function update_tft_firmware () {
+function update_tft_firmware () : void {
     if ((existsObject(NSPanel_Path + 'Config.Update.activ') != false) && (existsObject(NSPanel_Path + 'Display_Firmware.TFT.currentVersion') != false)) {
         let id = getState(NSPanel_Path + 'Display_Firmware.TFT.currentVersion').val;
         let currentVersion = id.split('/');
@@ -4529,7 +4575,7 @@ function update_tft_firmware () {
                         }
                         axios
                             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                            .then(async function (response) {
+                            .then(async function (response: any) {
                                 if (response.status === 200) {
                                     if (Debug) {
                                         log(response.data, 'info');
@@ -4541,7 +4587,7 @@ function update_tft_firmware () {
                                     log('Axios Status - update_tft_firmware: ' + response.state, 'warn');
                                 }
                             })
-                            .catch(function (error) {
+                            .catch(function (error: any) {
                                 log(error, 'warn');
                             });
                     } catch (err: any) {
@@ -4561,7 +4607,7 @@ function update_tft_firmware () {
  * @function check_updates
  * @throws {Error} If an error occurs during the update check.
  */
-function update_tasmota_firmware () {
+function update_tasmota_firmware(): void {
     if (existsObject(NSPanel_Path + 'Config.Update.activ') != false) {
         try {
             if (getState(NSPanel_Path + 'Config.Update.activ').val == 0) {
@@ -4571,7 +4617,7 @@ function update_tasmota_firmware () {
                 }
                 axios
                     .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                    .then(async function (response) {
+                    .then(async function (response: any) {
                         if (response.status === 200) {
                             if (Debug) {
                                 log(response.data, 'info');
@@ -4580,7 +4626,7 @@ function update_tasmota_firmware () {
                             log('Axios Status - update_tasmota_firmware ==> set OTA: ' + response.state, 'warn');
                         }
                     })
-                    .catch(function (error) {
+                    .catch(function (error: any) {
                         log(error, 'warn');
                     });
 
@@ -4591,7 +4637,7 @@ function update_tasmota_firmware () {
 
                 axios
                     .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                    .then(async function (response) {
+                    .then(async function (response: any) {
                         if (response.status === 200) {
                             if (Debug) {
                                 log(response.data, 'info');
@@ -4600,7 +4646,7 @@ function update_tasmota_firmware () {
                             log('Axios Status - update_tasmota_firmware: ' + response.state, 'warn');
                         }
                     })
-                    .catch(function (error) {
+                    .catch(function (error: any) {
                         log(error, 'warn');
                     });
             }
@@ -4645,7 +4691,7 @@ on({id: config.panelRecvTopic.substring(0, config.panelRecvTopic.length - 'RESUL
  * @param {NSPanel.Payload | NSPanel.Payload[]} val Payload or Array of Payload to send
  * @returns {Promise<void>}
  */
-async function SendToPanel (val: NSPanel.Payload | NSPanel.Payload[]) {
+async function SendToPanel (val: NSPanel.Payload | NSPanel.Payload[]): Promise<void> {
     try {
         if (Array.isArray(val)) {
             val.forEach(function (id) {
@@ -4733,7 +4779,7 @@ function HandleMessage (typ: string, method: NSPanel.EventMethod, page: number |
                         let tempPageItem = words[3].split('?');
                         let placeId: number | undefined = undefined;
                         if (!isNaN(parseInt(tempPageItem[0]))) {
-                            tempId = activePage!.items[tempPageItem[0]].id;
+                            tempId = activePage!.items[parseInt(tempPageItem[0])]?.id;
                             placeId = parseInt(tempPageItem[0]);
                             if (tempId == undefined) {
                                 throw new Error(`Missing id in HandleMessage!`);
@@ -4886,40 +4932,59 @@ function GeneratePage (page: PageType): void {
  * @function HandleHardwareButton
  * @param {NSPanel.EventMethod} method - The method associated with the hardware button event.
  */
-function HandleHardwareButton (method: NSPanel.EventMethod): void {
+function HandleHardwareButton (method: 'button1' | 'button2' | any): void {
     try {
-        let buttonConfig: NSPanel.ConfigButtonFunction = config[method];
-        if (buttonConfig.mode === null) {
+        // HIER DER FIX: Wir stellen sicher, dass es NUR 'button1' oder 'button2' sein kann
+        if (method !== 'button1' && method !== 'button2') {
+            if (Debug) log('HandleHardwareButton: Ungültige Taste übergeben: ' + method, 'warn');
             return;
         }
+
+        // Durch diesen expliziten Cast weiß TypeScript nun zu 100%, 
+        // dass der Schlüssel exakt auf das 'Config'-Objekt passt.
+        const buttonKey = method as 'button1' | 'button2';
+        let buttonConfig: NSPanel.ConfigButtonFunction = config[buttonKey];
+        
+        if (!buttonConfig || buttonConfig.mode === null) {
+            return;
+        }
+
         switch (buttonConfig.mode) {
             case 'page':
                 if (Debug) log('HandleHardwareButton -> Mode Page', 'info');
                 if (buttonConfig.page) {
-                    if (method == 'button1') {
+                    if (buttonKey === 'button1') {
                         pageId = -1;
-                    } else if (method == 'button2') {
+                    } else if (buttonKey === 'button2') {
                         pageId = -2;
                     }
                     GeneratePage(buttonConfig.page);
                     break;
                 }
+                break;
+
             case 'toggle':
                 if (Debug) log('HandleHardwareButton -> Mode Toggle', 'info');
                 if (buttonConfig.entity) {
-                    let current = getState(buttonConfig.entity).val;
+                    const toggleState = getState(buttonConfig.entity);
+                    let current = toggleState && toggleState.val !== null ? !!toggleState.val : false;
                     setState(buttonConfig.entity, !current);
                 }
                 screensaverEnabled = true;
                 break;
+
             case 'set':
                 if (Debug) log('HandleHardwareButton -> Mode Set', 'info');
-                if (buttonConfig.setOn && existsState(buttonConfig.setOn.dp) && !buttonToggleState[method]) {
+                
+                // Auch hier nutzen wir jetzt den vollkommen sicheren 'buttonKey'
+                const isToggled = !!(buttonToggleState as any)[buttonKey];
+
+                if (buttonConfig.setOn && existsState(buttonConfig.setOn.dp) && !isToggled) {
                     setState(buttonConfig.setOn.dp, buttonConfig.setOn.val);
-                    buttonToggleState[method] = true;
-                } else if (buttonConfig.setOff && existsState(buttonConfig.setOff.dp) && buttonToggleState[method]) {
+                    (buttonToggleState as any)[buttonKey] = true;
+                } else if (buttonConfig.setOff && existsState(buttonConfig.setOff.dp) && isToggled) {
                     setState(buttonConfig.setOff.dp, buttonConfig.setOff.val);
-                    buttonToggleState[method] = false;
+                    (buttonToggleState as any)[buttonKey] = false;
                 } else if (buttonConfig.entity && existsState(buttonConfig.entity)) {
                     setState(buttonConfig.entity, buttonConfig.setValue);
                 }
@@ -5010,7 +5075,7 @@ function GenerateEntitiesPage (page: NSPanel.PageEntities): NSPanel.Payload[] {
     try {
         let out_msgs: NSPanel.Payload[];
         out_msgs = [{payload: 'pageType~cardEntities'}];
-        out_msgs.push({payload: GeneratePageElements(page)});
+        out_msgs.push({ payload: GeneratePageElements(page) ?? '' }); // Falls doch undefined zurückkommt, leeren String nutzen
         return out_msgs;
     } catch (err: any) {
         log('error at function GenerateEntitiesPage: ' + err.message, 'warn');
@@ -5031,7 +5096,7 @@ function GenerateSchedulePage (page: NSPanel.PageSchedule): NSPanel.Payload[] {
     try {
         let out_msgs: NSPanel.Payload[];
         out_msgs = [{payload: 'pageType~cardSchedule'}];
-        out_msgs.push({payload: GeneratePageElements(page)});
+        out_msgs.push({ payload: GeneratePageElements(page) ?? '' }); // Falls doch undefined zurückkommt, leeren String nutzen
         return out_msgs;
     } catch (err: any) {
         log('error at function GenerateSchedulePage: ' + err.message, 'warn');
@@ -5051,7 +5116,7 @@ function GenerateSchedulePage (page: NSPanel.PageSchedule): NSPanel.Payload[] {
 function GenerateGridPage (page: NSPanel.PageGrid): NSPanel.Payload[] {
     try {
         let out_msgs: NSPanel.Payload[] = [{payload: 'pageType~cardGrid'}];
-        out_msgs.push({payload: GeneratePageElements(page)});
+        out_msgs.push({ payload: GeneratePageElements(page) ?? '' }); // Falls doch undefined zurückkommt, leeren String nutzen
         return out_msgs;
     } catch (err: any) {
         log('error at function GenerateGridPage: ' + err.message, 'warn');
@@ -5071,7 +5136,7 @@ function GenerateGridPage (page: NSPanel.PageGrid): NSPanel.Payload[] {
 function GenerateGridPage2 (page: NSPanel.PageGrid2): NSPanel.Payload[] {
     try {
         let out_msgs: NSPanel.Payload[] = [{payload: 'pageType~cardGrid2'}];
-        out_msgs.push({payload: GeneratePageElements(page)});
+        out_msgs.push({ payload: GeneratePageElements(page) ?? '' }); // Falls doch undefined zurückkommt, leeren String nutzen
         return out_msgs;
     } catch (err: any) {
         log('error at function GenerateGridPage2: ' + err.message, 'warn');
@@ -5091,7 +5156,7 @@ function GenerateGridPage2 (page: NSPanel.PageGrid2): NSPanel.Payload[] {
 function GenerateGridPage3 (page: NSPanel.PageGrid3): NSPanel.Payload[] {
     try {
         let out_msgs: NSPanel.Payload[] = [{payload: 'pageType~cardGrid3'}];
-        out_msgs.push({payload: GeneratePageElements(page)});
+        out_msgs.push({ payload: GeneratePageElements(page) ?? '' }); // Falls doch undefined zurückkommt, leeren String nutzen
         return out_msgs;
     } catch (err: any) {
         log('error at function GenerateGridPage3: ' + err.message, 'warn');
@@ -5185,10 +5250,11 @@ function GeneratePageElements (page: PageType): string {
                 pageCounter = 1;
                 GeneratePage(activePage!);
             }, 500);
+            return 'loading~page'; // Wichtig: Hier immer einen String zurückgeben!
         }
     } catch (err: any) {
         log('error at function GeneratePageElements: ' + err.message, 'warn');
-        return '';
+        return ''; // Auch hier sicherstellen, dass ein String zurückgegeben wird
     }
 }
 
@@ -5211,7 +5277,7 @@ function CreateEntity (pageItem: PageItem, placeId: number, useColors: boolean =
             return '~delete~~~~~';
         }
 
-        let name: string;
+        let name: string = '';
         let buttonText: string = 'PRESS';
         let type: NSPanel.SerialType;
 
@@ -5226,8 +5292,20 @@ function CreateEntity (pageItem: PageItem, placeId: number, useColors: boolean =
                 o = getObject(pageItem.id);
             }
 
-            // Fallback if no name is given
-            name = pageItem.name !== undefined ? pageItem.name : o.common.name.de == undefined ? o.common.name : o.common.name.de;
+            // SICHERHEIT: Fallback-Name generieren, falls 'o' oder 'o.common' fehlt
+            if (pageItem.name !== undefined) {
+                name = pageItem.name;
+            } else if (o && o.common && o.common.name) {
+                // Prüfen, ob Name ein ioBroker-Sprachobjekt oder ein einfacher String ist
+                if (typeof o.common.name === 'object' && o.common.name.de !== undefined) {
+                    name = o.common.name.de;
+                } else {
+                    name = typeof o.common.name === 'object' ? JSON.stringify(o.common.name) : o.common.name;
+                }
+            } else {
+                name = pageItem.id || 'Unknown';
+            }
+
             const prefix = pageItem.prefixName !== undefined ? pageItem.prefixName : '';
             const suffix = pageItem.suffixName !== undefined ? pageItem.suffixName : '';
 
@@ -5242,36 +5320,38 @@ function CreateEntity (pageItem: PageItem, placeId: number, useColors: boolean =
             }
             name = prefix + name + suffix;
 
-            if (existsState(pageItem.id + '.GET')) {
-                val = getState(pageItem.id + '.GET').val;
-                RegisterEntityWatcher(pageItem.id + '.GET');
-            }
-            if (pageItem.monobutton != undefined && pageItem.monobutton == true) {
-                if (existsState(pageItem.id + '.ACTUAL')) {
-                    val = getState(pageItem.id + '.ACTUAL').val;
-                    RegisterEntityWatcher(pageItem.id + '.ACTUAL');
+            if (pageItem.id != null) {
+                if (existsState(pageItem.id + '.GET')) {
+                    val = getState(pageItem.id + '.GET').val;
+                    RegisterEntityWatcher(pageItem.id + '.GET');
                 }
-            } else {
-                if (existsState(pageItem.id + '.ACTUAL')) {
-                    val = getState(pageItem.id + '.ACTUAL').val;
-                    RegisterEntityWatcher(pageItem.id + '.ACTUAL');
+                if (pageItem.monobutton != undefined && pageItem.monobutton == true) {
+                    if (existsState(pageItem.id + '.ACTUAL')) {
+                        val = getState(pageItem.id + '.ACTUAL').val;
+                        RegisterEntityWatcher(pageItem.id + '.ACTUAL');
+                    }
+                } else {
+                    if (existsState(pageItem.id + '.ACTUAL')) {
+                        val = getState(pageItem.id + '.ACTUAL').val;
+                        RegisterEntityWatcher(pageItem.id + '.ACTUAL');
+                    }
+                    if (existsState(pageItem.id + '.SET') && !existsState(pageItem.id + '.ACTUAL')) {
+                        val = getState(pageItem.id + '.SET').val;
+                        RegisterEntityWatcher(pageItem.id + '.SET');
+                    }
                 }
-				if (existsState(pageItem.id + '.SET') && !existsState(pageItem.id + '.ACTUAL')) {
-                    val = getState(pageItem.id + '.SET').val;
-                    RegisterEntityWatcher(pageItem.id + '.SET');
+                if (existsState(pageItem.id + '.ON_ACTUAL')) {
+                    val = getState(pageItem.id + '.ON_ACTUAL').val;
+                    RegisterEntityWatcher(pageItem.id + '.ON_ACTUAL');
                 }
-            }
-            if (existsState(pageItem.id + '.ON_ACTUAL')) {
-                val = getState(pageItem.id + '.ON_ACTUAL').val;
-                RegisterEntityWatcher(pageItem.id + '.ON_ACTUAL');
-            }
-            if (existsState(pageItem.id + '.ON_SET')) {
-                val = getState(pageItem.id + '.ON_SET').val;
-                RegisterEntityWatcher(pageItem.id + '.ON_SET');
-            }
-            if (existsState(pageItem.id + '.ON') && !existsState(pageItem.id + '.ON_ACTUAL')) {
-                val = getState(pageItem.id + '.ON').val;
-                RegisterEntityWatcher(pageItem.id + '.ON');
+                if (existsState(pageItem.id + '.ON_SET')) {
+                    val = getState(pageItem.id + '.ON_SET').val;
+                    RegisterEntityWatcher(pageItem.id + '.ON_SET');
+                }
+                if (existsState(pageItem.id + '.ON') && !existsState(pageItem.id + '.ON_ACTUAL')) {
+                    val = getState(pageItem.id + '.ON').val;
+                    RegisterEntityWatcher(pageItem.id + '.ON');
+                }
             }
 
             if (pageItem.navigate) {
@@ -5286,7 +5366,15 @@ function CreateEntity (pageItem: PageItem, placeId: number, useColors: boolean =
                     return '~' + type + '~' + 'navigate.' + pageItem.targetPage + '~' + iconId + '~' + iconColor + '~' + name + '~' + buttonText;
                 } else if (pageItem.id != null && pageItem.targetPage != undefined) {
                     type = 'button';
-                    const role = o.common.role as NSPanel.roles;
+                    
+                    // SICHERHEIT: Abfangen, falls Rolle nicht auslesbar ist
+                    const role = (o && o.common && o.common.role) ? (o.common.role as NSPanel.roles) : undefined;
+                    
+                    if (!role) {
+                        if (Debug) log('CreateEntity -> Rolle fehlt für ID: ' + pageItem.id, 'warn');
+                        return '';
+                    }
+
                     switch (role) {
                         case 'socket':
                         case 'light':
@@ -5309,6 +5397,7 @@ function CreateEntity (pageItem: PageItem, placeId: number, useColors: boolean =
                             break;
 
                         case 'blind':
+
                             iconId = pageItem.icon !== undefined ? Icons.GetIcon(pageItem.icon) : Icons.GetIcon('window-open');
                             /**
                              * The same extension can be found below in blind. vval=0 means closed / val=100 means open. If val is in between, icon3 is used.
@@ -5496,7 +5585,16 @@ function CreateEntity (pageItem: PageItem, placeId: number, useColors: boolean =
                     return '~' + type + '~' + 'navigate.' + pageItem.id + '~' + iconId + '~' + iconColor + '~' + name + '~' + buttonText;
                 }
             }
-            const role = o.common.role as NSPanel.roles;
+
+            // SICHERHEIT: Typ-Prüfung vor dem Auslesen der Rolle
+            const role = (o && o.common && o.common.role) ? (o.common.role as NSPanel.roles) : undefined;
+            
+            // Falls keine Rolle definiert ist, wird der Switch-Block übersprungen
+            if (!role) {
+                if (Debug) log('CreateEntity -> Rolle fehlt oder Objekt ungültig für ID: ' + pageItem.id, 'warn');
+                return ""; // oder 'return "";' je nachdem, ob Sie sich in einer Schleife/Funktion befinden
+            }
+
             switch (role) {
                 case 'socket':
                 case 'light':
@@ -6525,21 +6623,32 @@ function GetUnitOfMeasurement (id: string): string {
  * @param {NSPanel.PageThermo} page - The thermostat page configuration.
  * @returns {NSPanel.Payload[]} The payload array for the thermostat page.
  */
-function GenerateThermoPage (page: NSPanel.PageThermo): NSPanel.Payload[] {
+function GenerateThermoPage(page: NSPanel.PageThermo): NSPanel.Payload[] {
     try {
         UnsubscribeWatcher();
+
+        // SICHERHEIT: Prüfen, ob das Array existiert und das erste Element vorhanden ist
+        if (!page.items || !page.items[0]) {
+            if (Debug) log('GenerateThermoPage -> Keine Items auf der Seite definiert.', 'warn');
+            return [];
+        }
+
         let id = page.items[0].id;
         let out_msgs: NSPanel.Payload[] = [];
 
         // Leave the display on if the alwaysOnDisplay parameter is specified (true)
         if (page.type == 'cardThermo' && pageCounter == 0 && page.items[0].alwaysOnDisplay != undefined) {
-            out_msgs.push({payload: 'pageType~cardThermo'});
+            out_msgs.push({
+                payload: 'pageType~cardThermo'
+            });
             if (page.items[0].alwaysOnDisplay != undefined) {
                 if (page.items[0].alwaysOnDisplay) {
                     pageCounter = 1;
                     if (id && existsObject(id) && alwaysOn == false) {
                         alwaysOn = true;
-                        SendToPanel({payload: 'timeout~0'});
+                        SendToPanel({
+                            payload: 'timeout~0'
+                        });
                         subscribePowerSubscriptions(id);
                     }
                 }
@@ -6548,61 +6657,67 @@ function GenerateThermoPage (page: NSPanel.PageThermo): NSPanel.Payload[] {
             subscribePowerSubscriptions(id);
 
         } else {
-            out_msgs.push({payload: 'pageType~cardThermo'});
+            out_msgs.push({
+                payload: 'pageType~cardThermo'
+            });
         }
 
         // ioBroker
         if (id && existsObject(id)) {
+
             let o = getObject(id);
-            let name = page.heading !== undefined ? page.heading : o.common.name && typeof o.common.name === 'object' ? o.common.name.de : o.common.name;
-            let currentTemp = 0;
-            if (existsState(id + '.ACTUAL')) {
-                currentTemp = Math.round(parseFloat(getState(id + '.ACTUAL').val) * 10) / 10;
-            }
+            // SICHERHEIT: Objekt, common-Eigenschaft und Rolle validieren
+            if (o && o.common && o.common.role) {
+                const role = o.common.role as NSPanel.roles;
 
-            let minTemp = page.items[0].minValue !== undefined ? page.items[0].minValue : 50; //Min Temp 5°C
-            let maxTemp = page.items[0].maxValue !== undefined ? page.items[0].maxValue : 300; //Max Temp 30°C
-            let stepTemp = page.items[0].stepValue !== undefined ? page.items[0].stepValue : 5; //Default 0,5° Schritte
-
-            let destTemp = 0;
-            if (existsState(id + '.SET')) {
-                // using minValue, if .SET is null (e.g. for tado AWAY or tado is off)
-                let setValue = getState(id + '.SET').val;
-                if (setValue == null) {
-                    setValue = minTemp;
+                let name = page.heading !== undefined ? page.heading : o.common.name && typeof o.common.name === 'object' ? o.common.name.de : o.common.name;
+                let currentTemp = 0;
+                if (existsState(id + '.ACTUAL')) {
+                    currentTemp = Math.round(parseFloat(getState(id + '.ACTUAL').val) * 10) / 10;
                 }
 
-                destTemp = setValue.toFixed(2) * 10;
-            }
-            let statusStr: String = 'MANU';
+                let minTemp = page.items[0].minValue !== undefined ? page.items[0].minValue : 50; //Min Temp 5°C
+                let maxTemp = page.items[0].maxValue !== undefined ? page.items[0].maxValue : 300; //Max Temp 30°C
+                let stepTemp = page.items[0].stepValue !== undefined ? page.items[0].stepValue : 5; //Default 0,5° Schritte
 
-            if (existsState(id + '.MODE') && getState(id + '.MODE').val != null) {
-                if (getState(id + '.MODE').val === 1) {
-                    statusStr = 'MANU';
-                } else {
-                    statusStr = 'AUTO';
+                let destTemp = 0;
+                if (existsState(id + '.SET')) {
+                    // using minValue, if .SET is null (e.g. for tado AWAY or tado is off)
+                    let setValue = getState(id + '.SET').val;
+                    if (setValue == null) {
+                        setValue = minTemp;
+                    }
+
+                    destTemp = setValue.toFixed(2) * 10;
                 }
-            }
+                let statusStr: String = 'MANU';
 
-            //Add attributes if defined in alias
-            let i_list = Array.prototype.slice.apply($('[state.id="' + id + '.*"]'));
-            let bt = ['~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~'];
+                if (existsState(id + '.MODE') && getState(id + '.MODE').val != null) {
+                    if (getState(id + '.MODE').val === 1) {
+                        statusStr = 'MANU';
+                    } else {
+                        statusStr = 'AUTO';
+                    }
+                }
 
-            let tempIcon: string = '';
+                //Add attributes if defined in alias
+                let i_list = Array.prototype.slice.apply($('[state.id="' + id + '.*"]'));
+                let bt = ['~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~', '~~~~'];
 
-            let iconsObj: any;
-            if (page.items[0].customIcons != undefined) {
-                iconsObj = page.items[0].customIcons[0];
-            }
+                let tempIcon: string = '';
 
-            let tempIconOnColor: number = 35921;
-            let tempIconOffColor: number = 35921;
+                let iconsObj: any;
+                if (page.items[0].customIcons != undefined) {
+                    iconsObj = page.items[0].customIcons[0];
+                }
 
-            if (i_list.length - 3 != 0) {
-                let i = 0;
-                switch (o.common.role as NSPanel.roles) {
-                    case 'thermostat':
-                        {
+                let tempIconOnColor: number = 35921;
+                let tempIconOffColor: number = 35921;
+
+                if (i_list.length - 3 != 0) {
+                    let i = 0;
+                    switch (o.common.role as NSPanel.roles) {
+                        case 'thermostat': {
                             if (existsState(id + '.AUTOMATIC') && getState(id + '.AUTOMATIC').val != null) {
                                 if (getState(id + '.AUTOMATIC').val) {
                                     bt[i++] = Icons.GetIcon('alpha-a-circle') + '~' + rgb_dec565(On) + '~1~' + 'AUTT' + '~';
@@ -6744,8 +6859,7 @@ function GenerateThermoPage (page: NSPanel.PageThermo): NSPanel.Payload[] {
                             }
                         }
                         break;
-                    case 'airCondition':
-                        {
+                        case 'airCondition': {
                             if (existsState(id + '.MODE') && getState(id + '.MODE').val != null) {
                                 let Mode = getState(id + '.MODE').val;
                                 let States = getObject(id + '.MODE').common.states;
@@ -6921,69 +7035,71 @@ function GenerateThermoPage (page: NSPanel.PageThermo): NSPanel.Payload[] {
                             }
                         }
                         break;
+                    }
                 }
+
+                let destTemp2 = '';
+                if (page.items[0].setThermoDestTemp2 != undefined) {
+                    let setValue2 = getState(id + '.' + page.items[0].setThermoDestTemp2).val;
+                    destTemp2 = '' + setValue2.toFixed(2) * 10;
+                }
+
+                let thermoPopup = 1;
+                if (page.items[0].popupThermoMode1 != undefined) {
+                    thermoPopup = 0;
+                }
+
+                let temperatureUnit = getState(NSPanel_Path + 'Config.temperatureUnit').val;
+
+                let icon_res = bt[0] + bt[1] + bt[2] + bt[3] + bt[4] + bt[5] + bt[6] + bt[7];
+
+                if (statusStr == 'OFF') {
+                    stepTemp = 0;
+                    icon_res = bt[0] + '~~~~~~~~~~~~~~~~~~~~~~~~~~~~';
+                    thermoPopup = 1;
+                }
+
+                out_msgs.push({
+                    payload: 'entityUpd~' +
+                        name +
+                        '~' + // Heading
+                        getNavigationString(pageId) +
+                        '~' + // Page Navigation
+                        id +
+                        '~' + // internalNameEntity
+                        currentTemp +
+                        temperatureUnit +
+                        '~' + // Actual temperature (string)
+                        destTemp +
+                        '~' + // Target temperature (numeric without comma)
+                        statusStr +
+                        '~' + // Mode
+                        minTemp +
+                        '~' + // Thermostat min temperature
+                        maxTemp +
+                        '~' + // Thermostat max temperatur
+                        stepTemp +
+                        '~' + // Steps for Target (5°C)
+                        icon_res + // Icons Status
+                        findLocale('thermostat', 'Currently') +
+                        '~' + // Identifier in front of Current room temperature
+                        findLocale('thermostat', 'State') +
+                        '~~' + // Bezeichner vor State
+                        temperatureUnit +
+                        '~' + // iconTemperature dstTempTwoTempMode
+                        destTemp2 +
+                        '~' + // dstTempTwoTempMode --> Wenn Wert, dann 2 Temp
+                        thermoPopup, // PopUp
+                });
+            } else {
+                if (Debug) log('GenerateThermoPage -> Objektstruktur ungültig oder Rolle fehlt für ID: ' + id, 'warn');
             }
-
-            let destTemp2 = '';
-            if (page.items[0].setThermoDestTemp2 != undefined) {
-                let setValue2 = getState(id + '.' + page.items[0].setThermoDestTemp2).val;
-                destTemp2 = '' + setValue2.toFixed(2) * 10;
-            }
-
-            let thermoPopup = 1;
-            if (page.items[0].popupThermoMode1 != undefined) {
-                thermoPopup = 0;
-            }
-
-            let temperatureUnit = getState(NSPanel_Path + 'Config.temperatureUnit').val;
-
-            let icon_res = bt[0] + bt[1] + bt[2] + bt[3] + bt[4] + bt[5] + bt[6] + bt[7];
-
-            if (statusStr == 'OFF') {
-                stepTemp = 0;
-                icon_res = bt[0] + '~~~~~~~~~~~~~~~~~~~~~~~~~~~~';
-                thermoPopup = 1;
-            }
-
-            out_msgs.push({
-                payload:
-                    'entityUpd~' +
-                    name +
-                    '~' + // Heading
-                    getNavigationString(pageId) +
-                    '~' + // Page Navigation
-                    id +
-                    '~' + // internalNameEntity
-                    currentTemp +
-                    temperatureUnit +
-                    '~' + // Actual temperature (string)
-                    destTemp +
-                    '~' + // Target temperature (numeric without comma)
-                    statusStr +
-                    '~' + // Mode
-                    minTemp +
-                    '~' + // Thermostat min temperature
-                    maxTemp +
-                    '~' + // Thermostat max temperatur
-                    stepTemp +
-                    '~' + // Steps for Target (5°C)
-                    icon_res + // Icons Status
-                    findLocale('thermostat', 'Currently') +
-                    '~' + // Identifier in front of Current room temperature
-                    findLocale('thermostat', 'State') +
-                    '~~' + // Bezeichner vor State
-                    temperatureUnit +
-                    '~' + // iconTemperature dstTempTwoTempMode
-                    destTemp2 +
-                    '~' + // dstTempTwoTempMode --> Wenn Wert, dann 2 Temp
-                    thermoPopup, // PopUp
-            });
         }
-
         if (Debug) {
             log('GenerateThermoPage payload: ' + out_msgs, 'info');
         }
         return out_msgs;
+
     } catch (err: any) {
         log('error at function GenerateThermoPage: ' + err.message, 'warn');
         return [];
@@ -7057,7 +7173,14 @@ function GenerateThermo2Page (page: NSPanel.PageThermo2): NSPanel.Payload[] {
 
         UnsubscribeWatcher();
         activePage = page;
-        unsubscribeThermo2Subscriptions;
+        // HIER FIX: Klammern hinzugefügt, um die Funktion tatsächlich aufzurufen
+        unsubscribeThermo2Subscriptions();
+
+        // Absicherung, falls thermoItems unvollständig ist
+        if (!page.thermoItems || page.thermoItems.length < 4) {
+            if (Debug) log('GenerateThermo2Page: thermoItems ist unvollständig definiert!', 'warn');
+            return [];
+        }
 
         let id = page.thermoItems[0].id;
         let out_msgs: NSPanel.Payload[] = [];
@@ -7065,14 +7188,12 @@ function GenerateThermo2Page (page: NSPanel.PageThermo2): NSPanel.Payload[] {
         // Leave the display on if the alwaysOnDisplay parameter is specified (true)
         if (page.type == 'cardThermo2' && pageCounter == 0 && page.alwaysOnDisplay != undefined) {
             out_msgs.push({payload: 'pageType~cardThermo2'});
-            if (page.alwaysOnDisplay != undefined) {
-                if (page.alwaysOnDisplay) {
-                    pageCounter = 1;
-                    if (existsObject(id) && alwaysOn == false) {
-                        alwaysOn = true;
-                        SendToPanel({payload: 'timeout~0'});
-                        subscribeThermo2Subscriptions(id);
-                    }
+            if (page.alwaysOnDisplay) {
+                pageCounter = 1;
+                if (existsObject(id) && alwaysOn == false) {
+                    alwaysOn = true;
+                    SendToPanel({payload: 'timeout~0'});
+                    subscribeThermo2Subscriptions(id);
                 }
             }
         } else if (id && existsObject(id) && page.type == 'cardThermo2' && pageCounter == 1) {
@@ -7083,78 +7204,90 @@ function GenerateThermo2Page (page: NSPanel.PageThermo2): NSPanel.Payload[] {
 
         if (id && existsObject(id)) {
             let o = getObject(id);
-            let name = page.heading !== undefined ? page.heading : o.common.name && typeof o.common.name === 'object' ? o.common.name.de : o.common.name;
-            let currentTemp = 0;
-            if (existsState(page.thermoItems[1].id)) {
-                currentTemp = Math.round(parseFloat(getState(page.thermoItems[1].id).val) * 10);
-            }
-            let tempUnit = page.thermoItems[1].unit !== undefined ? page.thermoItems[1].unit : "?";
-            let tempColor = page.thermoItems[1].unit !== undefined ? rgb_dec565(page.thermoItems[1].onColor) : '64512';
+            
+            // HIER FIX 1: o und o.common absichern, um 'possibly undefined' zu verhindern
+            if (o && o.common) {
+                let name = page.heading !== undefined ? page.heading : (o.common.name && typeof o.common.name === 'object' ? (o.common.name as any).de : o.common.name);
+                
+                let currentTemp = 0;
+                if (existsState(page.thermoItems[1].id)) {
+                    const stateVal = getState(page.thermoItems[1].id).val;
+                    currentTemp = Math.round(parseFloat(String(stateVal)) * 10);
+                }
+                let tempUnit = page.thermoItems[1].unit !== undefined ? page.thermoItems[1].unit : "?";
+                let tempColor = page.thermoItems[1].unit !== undefined && page.thermoItems[1].onColor !== undefined ? rgb_dec565(page.thermoItems[1].onColor) : '64512';
 
-            let currentHumidity = 0;
-            if (existsState(page.thermoItems[2].id)) {
-                currentHumidity = Math.round(parseFloat(getState(page.thermoItems[2].id).val) * 10);
-            }
-            let humidityUnit = page.thermoItems[2].unit !== undefined ? page.thermoItems[2].unit : "?";
-            let humColor = page.thermoItems[2].unit !== undefined ? rgb_dec565(page.thermoItems[2].onColor) : '1048';
+                let currentHumidity = 0;
+                if (existsState(page.thermoItems[2].id)) {
+                    const stateVal = getState(page.thermoItems[2].id).val;
+                    currentHumidity = Math.round(parseFloat(String(stateVal)) * 10);
+                }
+                let humidityUnit = page.thermoItems[2].unit !== undefined ? page.thermoItems[2].unit : "?";
+                let humColor = page.thermoItems[2].unit !== undefined && page.thermoItems[2].onColor !== undefined ? rgb_dec565(page.thermoItems[2].onColor) : '1048';
 
-            let obj = getObject(page.thermoItems[3].id);
-            let actualModeState = getState(page.thermoItems[3].id).val;
-            let modeStatus = obj.common['states'][getState(page.thermoItems[3].id).val] ?? ''
-            let textStateColor = page.thermoItems[3].unit !== undefined ? rgb_dec565(page.thermoItems[3].onColor) : '64512';
+                let obj = getObject(page.thermoItems[3].id);
+                let actualModeState = getState(page.thermoItems[3].id).val;
+                let modeStatus = '';
+                
+                // HIER FIX 2: obj und obj.common['states'] absichern
+                if (obj && obj.common && (obj.common as any).states) {
+                    modeStatus = (obj.common as any).states[String(actualModeState)] ?? '';
+                }
+                
+                let textStateColor = page.thermoItems[3].unit !== undefined && page.thermoItems[3].onColor !== undefined ? rgb_dec565(page.thermoItems[3].onColor) : '64512';
 
-            let minTemp: number = page.thermoItems[0].minValue !== undefined ? page.thermoItems[0].minValue * 10 : 45; //Min Temp 4,5°C
-            let maxTemp: number = page.thermoItems[0].maxValue !== undefined ? page.thermoItems[0].maxValue * 10 : 305; //Max Temp 30,5°C
-            let stepTemp: number = page.thermoItems[0].stepValue !== undefined ? page.thermoItems[0].stepValue * 10 : 5; //Default 0,5° Schritte
-            let unit: string = page.thermoItems[0].unit !== undefined ? page.thermoItems[0].unit : '°C'; //Default 0,5° Schritte
+                let minTemp: number = page.thermoItems[0].minValue !== undefined ? page.thermoItems[0].minValue * 10 : 45; //Min Temp 4,5°C
+                let maxTemp: number = page.thermoItems[0].maxValue !== undefined ? page.thermoItems[0].maxValue * 10 : 305; //Max Temp 30,5°C
+                let stepTemp: number = page.thermoItems[0].stepValue !== undefined ? page.thermoItems[0].stepValue * 10 : 5; //Default 0,5° Schritte
+                let unit: string = page.thermoItems[0].unit !== undefined ? page.thermoItems[0].unit : '°C'; 
 
-            let destTemp = 0;
-            if (existsState(id + '.SET')) {
-                let setValue = getState(id + '.SET').val;
-                if (setValue == null) {
-                    setValue = minTemp;
+                let destTemp = 0;
+                if (existsState(id + '.SET')) {
+                    let setValue = getState(id + '.SET').val;
+                    if (setValue == null) {
+                        setValue = minTemp;
+                    }
+                    // HIER FIX 3: .toFixed() String-Multiplikationsfehler korrigiert
+                    destTemp = Number(Number(setValue).toFixed(2)) * 10;
                 }
 
-                destTemp = setValue.toFixed(2) * 10;
-            }
-
-            let message: string = 
-                    'entityUpd~' +
-                    name + // Heading 1
-                    '~' + 
-                    getNavigationString(pageId) +   // 2-13 Page Navigation 
-                    /*-Temp Control-----------------------------------*/
-                    '~' + id + '~' + destTemp + '~' + minTemp + '~' + maxTemp + '~' + stepTemp + '~' + unit + '~' + /* 20 */ actualModeState +
-                    /* Entity 1 - Actual Temperature (Icon) */
-                    '~text~' + pageId + '?1~' + Icons.GetIcon('thermometer') + '~' + tempColor + '~~' +
-                    /* Entity 2 - Actual Temperature (Temp) */
-                    '~text~' + pageId + '?2~' + currentTemp + '~' + tempColor + '~~' +
-                    /* Entity 3 - Actual Temperature (Unit) */
-                    '~text~' + pageId + '?3~' + tempUnit + '~' + tempColor + '~~' +
-                    /* Entity 4 - Actual Humidity (Icon) */
-                    '~text~' + pageId + '?4~' + Icons.GetIcon('water-percent') + '~' + humColor + '~~' +
-                    /* Entity 5 - Actual Humidity (Hum) */
-                    '~text~' + pageId + '?5~' + currentHumidity + '~' + humColor + '~~' +
-                    /* Entity 6 - Actual Humidity (Unit) */
-                    '~text~' + pageId + '?6~' + humidityUnit + '~' + humColor + '~~' +
-                    /* Entity 7 - Text-State */
-                    '~text~' + pageId + '?7~' + modeStatus + '~' + textStateColor + '~~' + /* 62 */ actualModeState;
-                    
-            for (let i=0; i<9; i++) {
-                if(page.items[i] != undefined) {
-                    id = page.items[i];
-                    message = message + CreateEntity(id, i, true);
-                } else {
-                    id = 'delete'
-                    message = message + CreateEntity(id, i);
+                let message: string = 
+                        'entityUpd~' +
+                        name + // Heading 1
+                        '~' + 
+                        getNavigationString(pageId) +   // 2-13 Page Navigation 
+                        /*-Temp Control-----------------------------------*/
+                        '~' + id + '~' + destTemp + '~' + minTemp + '~' + maxTemp + '~' + stepTemp + '~' + unit + '~' + /* 20 */ actualModeState +
+                        /* Entity 1 - Actual Temperature (Icon) */
+                        '~text~' + pageId + '?1~' + Icons.GetIcon('thermometer') + '~' + tempColor + '~~' +
+                        /* Entity 2 - Actual Temperature (Temp) */
+                        '~text~' + pageId + '?2~' + currentTemp + '~' + tempColor + '~~' +
+                        /* Entity 3 - Actual Temperature (Unit) */
+                        '~text~' + pageId + '?3~' + tempUnit + '~' + tempColor + '~~' +
+                        /* Entity 4 - Actual Humidity (Icon) */
+                        '~text~' + pageId + '?4~' + Icons.GetIcon('water-percent') + '~' + humColor + '~~' +
+                        /* Entity 5 - Actual Humidity (Hum) */
+                        '~text~' + pageId + '?5~' + currentHumidity + '~' + humColor + '~~' +
+                        /* Entity 6 - Actual Humidity (Unit) */
+                        '~text~' + pageId + '?6~' + humidityUnit + '~' + humColor + '~~' +
+                        /* Entity 7 - Text-State */
+                        '~text~' + pageId + '?7~' + modeStatus + '~' + textStateColor + '~~' + /* 62 */ actualModeState;
+                        
+                for (let i=0; i<9; i++) {
+                    // HIER FIX 4: page.items auf Existenz prüfen, bevor auf den Index zugegriffen wird
+                    if(page.items && page.items[i] != undefined) {
+                        id = page.items[i];
+                        message = message + CreateEntity(id, i, true);
+                    } else {
+                        id = 'delete'
+                        message = message + CreateEntity(id, i);
+                    }
                 }
+
+                out_msgs.push({
+                    payload: message
+                });
             }
-
-            out_msgs.push({
-                payload:
-                    message
-            });
-
         }
 
         if (Debug) {
@@ -7649,11 +7782,21 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
         }
 
         if (existsObject(id)) {
-            let name = getState(id + '.ALBUM').val;
+
+            let name = "";
+            if (page.items[0].showOnlyPlayerHeadline && page.items[0].showOnlyPlayerHeadline != undefined) {
+                //name = getState(page.items[0].adapterPlayerInstance + "Players.SqueezePlay.Playername").val;
+                name = getState(page.items[0].adapterPlayerInstance + "Players." + page.items[0].mediaDevice + ".Playername").val;
+                //name = page.heading;
+            } else {
+                name = getState(id + '.ALBUM').val;
+                console.log("##### else name");
+            }
             let title = getState(id + '.TITLE').val;
             if (title && title.indexOf('~') !== -1) {
                 title = title.split('~')[0].trim();
             }
+
             if (title.length > 24) {
                 title = title.slice(0, 24) + '...';
             }
@@ -7663,6 +7806,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
                     let Seconds = parseInt(getState(id + '.DURATION').val) % 60 < 10 ? '0' : '';
                     let Duration = Math.floor(getState(id + '.DURATION').val / 60) + ':' + Seconds + (getState(id + '.DURATION').val % 60);
                     let vElapsed = getState(id + '.ELAPSED').val;
+
                     if (vElapsed.length == 5) {
                         if (parseInt(vElapsed.slice(0, 2)) < 9) {
                             vElapsed = vElapsed.slice(1);
@@ -7723,12 +7867,17 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
 
             let author = getState(id + '.ARTIST').val;
 
-            if (v2Adapter == 'squeezeboxrpc' && author.length == 0) {
+            if (v2Adapter == 'squeezeboxrpc' && author.length > 0) {
                 if (existsObject([page.items[0].adapterPlayerInstance, 'Players.', page.items[0].mediaDevice, '.Playlist'].join(''))) {
                     if (existsObject([page.items[0].adapterPlayerInstance, 'Players.', page.items[0].mediaDevice, '.Playlist'].join(''))) {
                         let lmstracklist = JSON.parse(getState([page.items[0].adapterPlayerInstance, 'Players.', page.items[0].mediaDevice, '.Playlist'].join('')).val);
                         let currentIndex: number = parseInt(getState([page.items[0].adapterPlayerInstance, 'Players.', page.items[0].mediaDevice, '.PlaylistCurrentIndex'].join('')).val);
-                        author = lmstracklist[currentIndex].Artist + '|' + lmstracklist[currentIndex].Album;
+                        
+                        author = lmstracklist[currentIndex].Artist;
+                        if (author == undefined || author == "undefined") {
+                            author = getState(id + '.ARTIST').val;
+                        } 
+                        author = author + '|' + lmstracklist[currentIndex].Album;
                         if (author.length > 37) {
                             author = author.slice(0, 37) + '...';
                         }
@@ -7870,7 +8019,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
                         media_icon = Icons.GetIcon(page.items[0].playerMediaIcon);
                     }
                 }
-                if (name.length == 0) {
+                if (typeof name !== 'string' || name.length == 0) {
                     name = page.heading;
                 } else if (name.length > 16) {
                     name = name.slice(0, 16) + '...';
@@ -8025,37 +8174,56 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
             // All Alexa devices (the online / player and commands directory is available) are listed and linked below
             // If the constant alexaSpeakerList contains at least one entry, the constant is used - otherwise all devices from the Alexa adapter
             let speakerListArray: string[] = [];
-            if (page.items[0].speakerList && page.items[0].speakerList.length > 0) {
-                for (let i_index in page.items[0].speakerList) {
-                    speakerListArray.push(page.items[0].speakerList[i_index]);
-                }
-            } else if (v2Adapter == 'squeezeboxrpc') {
-                // Beim Squeezeboxrpc ist jeder Player ein eigener Knoten im Objektbaum. Somit werden einzelne Aliase benötigt.
-                const squeezeboxPlayerQuery: iobJS.QueryResult = $('channel[state.id=' + page.items[0].adapterPlayerInstance + '.Players.*.Playername]');
-                squeezeboxPlayerQuery.each((playerId: string, playerIndex: number) => {
-                    speakerListArray.push(getState(playerId).val);
-                    page.items[0].speakerList = speakerListArray;
-                });
-            } else if (v2Adapter == 'spotify-premium') {
-                // All possible Devices if page.items[0].speakerList empty
-                if (Debug) log(getState(page.items[0].adapterPlayerInstance + 'devices.availableDeviceListString').val);
-                speakerListArray = getState(page.items[0].adapterPlayerInstance + 'devices.availableDeviceListString').val.split(';');
-                page.items[0].speakerList = speakerListArray;
-            } else if (v2Adapter == 'mpd') {
-                // All possible Devices if page.items[0].speakerList empty
-                page.items[0].speakerList[0] = v1Adapter[0] + '.' + v1Adapter[1];
-            } else {
-                let i_list = Array.prototype.slice.apply($('[state.id="' + page.items[0].adapterPlayerInstance + 'Echo-Devices.*.Info.name"]'));
-                for (let i_index in i_list) {
-                    let i = i_list[i_index];
-                    let deviceId = i;
-                    deviceId = deviceId.split('.');
-                    if (
-                        getState([page.items[0].adapterPlayerInstance, 'Echo-Devices.', deviceId[3], '.online'].join('')).val &&
-                        existsObject([page.items[0].adapterPlayerInstance, 'Echo-Devices.', deviceId[3], '.Player'].join('')) &&
-                        existsObject([page.items[0].adapterPlayerInstance, 'Echo-Devices.', deviceId[3], '.Commands'].join(''))
-                    ) {
-                        speakerListArray.push(getState(i).val);
+
+            // Sicherstellen, dass page.items existiert und belegt ist
+            if (page.items && page.items.length > 0) {
+                const currentItem = page.items[0]; // Verkürzung für sauberen Code
+
+                if (currentItem.speakerList && currentItem.speakerList.length > 0) {
+                    for (let i_index in currentItem.speakerList) {
+                        speakerListArray.push(currentItem.speakerList[i_index]);
+                    }
+                } else if (v2Adapter == 'squeezeboxrpc') {
+                    const squeezeboxPlayerQuery: iobJS.QueryResult = $('channel[state.id=' + currentItem.adapterPlayerInstance + '.Players.*.Playername]');
+                    squeezeboxPlayerQuery.each((playerId: string, playerIndex: number) => {
+                        const state = getState(playerId);
+                        if (state && state.val !== null) {
+                            speakerListArray.push(String(state.val));
+                        }
+                        currentItem.speakerList = speakerListArray;
+                    });
+                } else if (v2Adapter == 'spotify-premium') {
+                    const spotifyState = getState(currentItem.adapterPlayerInstance + 'devices.availableDeviceListString');
+                    // HIER FIX: Prüfen, ob der Spotify-Datenpunkt existiert und Text enthält
+                    if (spotifyState && spotifyState.val) {
+                        if (Debug) log(String(spotifyState.val));
+                        speakerListArray = String(spotifyState.val).split(';');
+                        currentItem.speakerList = speakerListArray;
+                    }
+                } else if (v2Adapter == 'mpd') {
+                    // HIER FIX: Falls speakerList undefined ist, initialisieren wir sie zuerst als leeres Array
+                    if (!currentItem.speakerList) {
+                        currentItem.speakerList = [];
+                    }
+                    currentItem.speakerList[0] = v1Adapter[0] + '.' + v1Adapter[1];
+                } else {
+                    let i_list = Array.prototype.slice.apply($('[state.id="' + currentItem.adapterPlayerInstance + 'Echo-Devices.*.Info.name"]'));
+                    for (let i_index in i_list) {
+                        let i = i_list[i_index];
+                        let deviceId = i.split('.');
+                        
+                        const onlineState = getState([currentItem.adapterPlayerInstance, 'Echo-Devices.', deviceId[3], '.online'].join(''));
+                        
+                        if (
+                            onlineState && onlineState.val &&
+                            existsObject([currentItem.adapterPlayerInstance, 'Echo-Devices.', deviceId[3], '.Player'].join('')) &&
+                            existsObject([currentItem.adapterPlayerInstance, 'Echo-Devices.', deviceId[3], '.Commands'].join(''))
+                        ) {
+                            const deviceState = getState(i);
+                            if (deviceState && deviceState.val !== null) {
+                                speakerListArray.push(String(deviceState.val));
+                            }
+                        }
                     }
                 }
             }
@@ -8084,7 +8252,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
 
                         axios
                             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                            .then(async function (response) {
+                            .then(async function (response: any) {
                                 if (response.status === 200) {
                                     if (Debug) {
                                         log(JSON.stringify(response.data), 'info');
@@ -8095,7 +8263,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
                                     log('Axios Status - get_volumio-playlist: ' + response.state, 'warn');
                                 }
                             })
-                            .catch(function (error) {
+                            .catch(function (error: any) {
                                 log(error, 'warn');
                             });
                     }
@@ -8138,7 +8306,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
 
                     axios
                         .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                        .then(async function (response) {
+                        .then(async function (response: any) {
                             if (response.status === 200) {
                                 if (Debug) {
                                     log(JSON.stringify(response.data), 'info');
@@ -8154,7 +8322,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
                                 log('Axios Status - get_volumio-queue: ' + response.state, 'warn');
                             }
                         })
-                        .catch(function (error) {
+                        .catch(function (error: any) {
                             log(error, 'warn');
                         });
                 }, 2000);
@@ -8358,7 +8526,7 @@ function GenerateMediaPage (page: NSPanel.PageMedia): NSPanel.Payload[] {
  * @returns {Promise<void>} A promise that resolves when the alias has been created.
  * @throws {Error} If an error occurs during the alias creation.
  */
-async function createAutoAlarmAlias (id: string, nsPath: string) {
+async function createAutoAlarmAlias (id: string, nsPath: string) : Promise<void> {
     try {
         if (Debug) {
             log('Alarm Alias Path: ' + id, 'info');
@@ -8567,7 +8735,7 @@ function GenerateAlarmPage (page: NSPanel.PageAlarm): NSPanel.Payload[] {
  * @returns {Promise<void>} A promise that resolves when the alias has been created.
  * @throws {Error} If an error occurs during the alias creation.
  */
-async function createAutoUnlockAlias (id: string, dpPath: string) {
+async function createAutoUnlockAlias (id: string, dpPath: string) : Promise<void> {
     try {
         if (Debug) {
             log('Unlock Alias Path: ' + id, 'info');
@@ -8677,7 +8845,7 @@ function GenerateUnlockPage (page: NSPanel.PageUnlock): NSPanel.Payload[] {
  * @returns {Promise<void>} A promise that resolves when the alias has been created.
  * @throws {Error} If an error occurs during the alias creation.
  */
-async function createAutoQRAlias (id: string, dpPath: string) {
+async function createAutoQRAlias (id: string, dpPath: string) : Promise<void> {
     try {
         if (Debug) {
             log('QRPage Alias Path: ' + id, 'info');
@@ -8712,8 +8880,18 @@ async function createAutoQRAlias (id: string, dpPath: string) {
 function GenerateQRPage (page: NSPanel.PageQR): NSPanel.Payload[] {
     try {
         activePage = page;
-        if (!page.items[0].id) throw new Error('Missing pageItem.id for cardQRPage!');
-        let id = page.items[0].id;
+        
+        // HIER FIX 1: Index [0] hinzugefügt, um das erste Element im Tupel zu prüfen
+        if (!page.items || !page.items[0] || !page.items[0].id) {
+            throw new Error('Missing pageItem.id for cardQRPage!');
+        }
+        
+        // HIER FIX 2: Auch hier [0] anhängen, damit firstItem das tatsächliche PageItem wird
+        const firstItem = page.items[0];
+        
+        // Jetzt funktioniert der Cast perfekt und zieht keine Folgefehler nach sich
+        let id = firstItem.id as string; 
+        
         let out_msgs: NSPanel.Payload[] = [];
         out_msgs.push({payload: 'pageType~cardQR'});
 
@@ -8724,20 +8902,34 @@ function GenerateQRPage (page: NSPanel.PageQR): NSPanel.Payload[] {
         }
         dpPath = dpPath + 'GuestWiFi.';
 
-        if (page.items[0].autoCreateALias) {
+        // Das funktioniert jetzt automatisch, da firstItem korrekt aufgelöst wurde
+        if (firstItem.autoCreateALias) {
             createAutoQRAlias(id, dpPath);
         }
 
         let o = getObject(id);
+        let heading = 'QR Code';
+        
+        // HIER FIX 1: getObject() auf Existenz prüfen
+        if (o && o.common) {
+            heading = page.heading !== undefined ? page.heading : (typeof o.common.name === 'object' ? (o.common.name as any).de : o.common.name);
+        }
 
-        let heading = page.heading !== undefined ? page.heading : typeof o.common.name === 'object' ? o.common.name.de : o.common.name;
-        let textQR = page.items[0].id + '.ACTUAL' !== undefined ? getState(page.items[0].id + '.ACTUAL').val : 'WIFI:T:undefined;S:undefined;P:undefined;H:;';
+        // HIER FIX 2: TextQR sicher auslesen und Fallback garantieren
+        let textQR = 'WIFI:T:undefined;S:undefined;P:undefined;H:;';
+        if (existsState(id + '.ACTUAL')) {
+            const actualState = getState(id + '.ACTUAL');
+            if (actualState && actualState.val !== null && actualState.val !== undefined) {
+                textQR = String(actualState.val);
+            }
+        }
+
         let hiddenPWD = false;
-        if (page.items[0].hidePassword !== undefined && page.items[0].hidePassword == true) {
+        if (firstItem.hidePassword !== undefined && firstItem.hidePassword == true) {
             hiddenPWD = true;
         }
         let hiddenSwitch = false;
-        if (page.items[0].hideEntity2 !== undefined && page.items[0].hideEntity2 == true) {
+        if (firstItem.hideEntity2 !== undefined && firstItem.hideEntity2 == true) {
             hiddenSwitch = true;
         }
 
@@ -8761,7 +8953,7 @@ function GenerateQRPage (page: NSPanel.PageQR): NSPanel.Payload[] {
         let type1 = 'text';
         let internalName1 = findLocale('qr', 'ssid');
         let iconId1 = Icons.GetIcon('wifi');
-        let iconColor1 = 65535
+        let iconColor1 = 65535;
         let displayName1 = findLocale('qr', 'ssid');
         let type2 = 'text';
         let internalName2 = findLocale('qr', 'password');
@@ -8769,16 +8961,20 @@ function GenerateQRPage (page: NSPanel.PageQR): NSPanel.Payload[] {
         let iconId2 = Icons.GetIcon('key');
         let displayName2 = findLocale('qr', 'password');
 
-        if (existsState(page.items[0].id + '.SWITCH')) {
-            iconColor1 = getState(page.items[0].id + '.SWITCH').val ? rgb_dec565(colorScale0) : rgb_dec565(colorScale10);
+        // Hilfsvariable für den Switch-State, um mehrfache unsaubere getState()-Aufrufe zu sichern
+        let switchStateVal = false;
+        if (existsState(id + '.SWITCH')) {
+            const swState = getState(id + '.SWITCH');
+            switchStateVal = swState && swState.val !== null ? !!swState.val : false;
+            iconColor1 = switchStateVal ? rgb_dec565(colorScale0) : rgb_dec565(colorScale10);
         }
 
         if (hiddenPWD) {
             type2 = 'switch';
             internalName2 = id;
-            iconId2 = getState(page.items[0].id + '.SWITCH').val ? Icons.GetIcon('router-wireless') : Icons.GetIcon('router-wireless-off');
-            displayName2 = getState(page.items[0].id + '.SWITCH').val ? findLocale('qr', 'Wlan enabled') : findLocale('qr', 'Wlan disabled');
-            optionalValue2 = getState(page.items[0].id + '.SWITCH').val ? 1 : 0;
+            iconId2 = switchStateVal ? Icons.GetIcon('router-wireless') : Icons.GetIcon('router-wireless-off');
+            displayName2 = switchStateVal ? findLocale('qr', 'Wlan enabled') : findLocale('qr', 'Wlan disabled');
+            optionalValue2 = switchStateVal ? 1 : 0;
         }
 
         if (hiddenSwitch) {
@@ -8792,35 +8988,21 @@ function GenerateQRPage (page: NSPanel.PageQR): NSPanel.Payload[] {
 
         out_msgs.push({
             payload:
-                'entityUpd~' + //entityUpd
-                heading +
-                '~' + //heading
-                getNavigationString(pageId) +
-                '~' + //navigation
-                textQR +
-                '~' + //textQR
-                type1 +
-                '~' + //type
-                internalName1 +
-                '~' + //internalName
-                iconId1 +
-                '~' + //iconId
-                iconColor1 +
-                '~' + //iconColor
-                displayName1 +
-                '~' + //displayName
-                optionalValue1 +
-                '~' + //optionalValue
-                type2 +
-                '~' + //type
-                internalName2 +
-                '~' + //internalName
-                iconId2 +
-                '~' + //iconId
-                iconColor2 +
-                '~' + //iconColor
-                displayName2 +
-                '~' + //displayName
+                'entityUpd~' +
+                heading + '~' +
+                getNavigationString(pageId) + '~' +
+                textQR + '~' +
+                type1 + '~' +
+                internalName1 + '~' +
+                iconId1 + '~' +
+                iconColor1 + '~' +
+                displayName1 + '~' +
+                optionalValue1 + '~' +
+                type2 + '~' +
+                internalName2 + '~' +
+                iconId2 + '~' +
+                iconColor2 + '~' +
+                displayName2 + '~' +
                 optionalValue2
         });
 
@@ -8833,7 +9015,6 @@ function GenerateQRPage (page: NSPanel.PageQR): NSPanel.Payload[] {
         return [];
     }
 }
-
 
 /**
  * Unsubscribes from all power-related subscriptions.
@@ -8899,53 +9080,74 @@ function subscribePowerSubscriptions (id: string): void {
  */
 function GeneratePowerPage (page: NSPanel.PagePower): NSPanel.Payload[] {
     try {
-        let obj: object = {};
+        //let obj: object = {};
+        let obj: PowerItem[] = []; // Oder ein initiales leeres Array vom Typ PowerItem[]
         let demoMode = false;
-        if (page.items[0].id === 'DEMO') {
+        
+        // Tupel- und Existenzprüfung direkt zu Beginn
+        if (!page.items || !page.items[0] || !page.items[0].id) {
+            throw Error('page.items ist nicht definiert oder die ID fehlt');
+        }
+
+        const firstItem = page.items[0];
+        // id einmal fest als sicheren string deklarieren
+        let id = firstItem.id as string;
+
+        if (id === 'DEMO') {
             log('No PageItem defined - cardPower demo mode active', 'info');
             demoMode = true;
         }
 
         activePage = page;
         if (Debug) {
-            log('GeneratePowerPage PageItem.id = ' + page.items[0].id, 'info');
+            log('GeneratePowerPage PageItem.id = ' + id, 'info');
         }
 
         let heading = 'cardPower Example';
-        if (!page.items[0].id || typeof page.items[0].id !== 'string') {throw Error('Id ist empty or not a string')}
+
         if (demoMode != true) {
-            let id = page.items[0].id;
             unsubscribePowerSubscriptions();
-
+            
             let o = getObject(id);
-            heading = page.heading !== undefined ? page.heading : typeof o.common.name === 'object' ? o.common.name.de : o.common.name;
+            // HIER FIX 1: Prüfen, ob das Objekt und dessen 'common'-Zweig existieren
+            if (o && o.common) {
+                heading = page.heading !== undefined ? page.heading : (typeof o.common.name === 'object' ? (o.common.name as any).de : o.common.name);
+            }
 
-            obj = JSON.parse(getState(page.items[0].id + '.ACTUAL').val);
+            // HIER FIX 2: Den ioBroker State sicher auslesen und auf Inhalt prüfen
+            const actualState = getState(id + '.ACTUAL');
+            if (actualState && actualState.val !== null && actualState.val !== undefined && actualState.val !== '') {
+                // Sicherstellen, dass hier ein Array von PowerItem[] zurückkommt
+                obj = JSON.parse(String(actualState.val)) as PowerItem[];
+            } else {
+                obj = []; // Sicherer Fallback, falls keine Datenpunkte geliefert wurden
+                if (Debug) log('ACTUAL-State der cardPower war leer oder ungültig.', 'warn');
+            }
         }
 
         let out_msgs: NSPanel.Payload[] = [];
 
         // Leave the display on if the alwaysOnDisplay parameter is specified (true)
-        if (page.type == 'cardPower' && pageCounter == 0 && page.items[0].alwaysOnDisplay != undefined) {
+        if (page.type == 'cardPower' && pageCounter == 0 && firstItem.alwaysOnDisplay != undefined) {
             out_msgs.push({payload: 'pageType~cardPower'});
-            if (page.items[0].alwaysOnDisplay != undefined) {
-                if (page.items[0].alwaysOnDisplay) {
-                    pageCounter = 1;
-                    if (alwaysOn == false) {
-                        alwaysOn = true;
-                        SendToPanel({payload: 'timeout~0'});
-                        subscribePowerSubscriptions(page.items[0].id);
-                    }
+            if (firstItem.alwaysOnDisplay) {
+                pageCounter = 1;
+                if (alwaysOn == false) {
+                    alwaysOn = true;
+                    SendToPanel({payload: 'timeout~0'});
+                    // HIER FIX 3: Nutzt die validierte 'id' Variable statt page.items[0].id
+                    subscribePowerSubscriptions(id);
                 }
             }
         } else if (page.type == 'cardPower' && pageCounter == 1) {
-            subscribePowerSubscriptions(page.items[0].id);
+            // HIER FIX 4: Nutzt die validierte 'id' Variable statt page.items[0].id
+            subscribePowerSubscriptions(id);
         } else {
             out_msgs.push({payload: 'pageType~cardPower'});
         }
 
         if (Debug) {
-            log('GeneratePowerPage PageItem.id = ' + page.items[0].id, 'info');
+            log('GeneratePowerPage PageItem.id = ' + id, 'info');
         }
 
         //Demo Data if no pageItem present
@@ -8958,15 +9160,21 @@ function GeneratePowerPage (page: NSPanel.PagePower): NSPanel.Payload[] {
 
         if (!demoMode) {
             for (let obji = 1; obji < 7; obji++) {
-                const color = obj[obji].iconColor !== '' ? obj[obji].iconColor : 0;
-                array_icon_color[obji] = arrayColorScale[color];
-                array_icon[obji] = obj[obji].icon;
-                array_powerspeed[obji] = obj[obji].speed;
-                array_powerstate[obji] = obj[obji].value + ' ' + obj[obji].unit;
+                const item = obj[obji]; // <-- Jetzt ist 'item' vom Typ PowerItem
+                if (item) { // Immer noch eine gute Idee, auf Existenz zu prüfen
+                    const color = item.iconColor !== '' ? item.iconColor : 0;
+                    array_icon_color[obji] = arrayColorScale[color as number]; // Ggf. auf number casten
+                    array_icon[obji] = item.icon;
+                    array_powerspeed[obji] = item.speed;
+                    array_powerstate[obji] = item.value + ' ' + item.unit;
+                }
             }
-            array_icon[0] = obj[0].icon;
-            array_powerstate[0] = obj[0].value + ' ' + obj[0].unit;
-            array_icon_color[0] = arrayColorScale[obj[0].iconColor];
+            
+            // HIER FIX 5: Kritische Verkettungen bei obj[0] abgesichert, falls obj[0] undefined ist
+            const homeItem = obj[0];
+            array_icon[0] = homeItem?.icon ?? 'home';
+            array_powerstate[0] = homeItem ? (homeItem.value + ' ' + homeItem.unit) : '';
+            array_icon_color[0] = arrayColorScale[homeItem?.iconColor as number ?? 0] ?? White;
         }
 
         let power_string: any = '';
@@ -9444,37 +9652,44 @@ function HandleButtonEvent (words: any): void {
                     let action = false;
                     if (words[4] == '1') action = true;
                     let o = getObject(id);
-                    if (Debug) {
-                        log('HandleButtonEvent -> OnOff: ' + words[4] + ' - ' + id + ' - Role - ' + o.common.role, 'info');
-                    }
-                    const role = o.common.role as NSPanel.roles;
-                    switch (role) {
-                        case 'level.mode.fan':
-                        case 'socket':
-                        case 'light':
-                            let pageItem = findPageItem(id);
-                            if (pageItem.monobutton != undefined && pageItem.monobutton == true) {
-                                triggerButton(id + '.SET');
-                            } else {
-                                setIfExists(id + '.SET', action);
-                            }
-                            break;
-                        case 'dimmer':
-                            setIfExists(id + '.ON_SET', action) ? true : setIfExists(id + '.ON_ACTUAL', action);
-                            break;
-                        case 'ct':
-                            setIfExists(id + '.ON', action);
-                            break;
-                        case 'rgb':
-                        case 'rgbSingle':
-                        case 'cie':
-                        case 'hue':
-                            setIfExists(id + '.ON', action);
-                            break;
-                        case 'switch.mode.wlan':
-                            setIfExists(id + '.SWITCH', action);
-                            GeneratePage(activePage!);
-                            break;
+                    
+                    // HIER FIX 1: Prüfen, ob das Objekt o und dessen Eigenschaft common überhaupt existieren
+                    if (o && o.common) {
+                        if (Debug) {
+                            log('HandleButtonEvent -> OnOff: ' + words[4] + ' - ' + id + ' - Role - ' + o.common.role, 'info');
+                        }
+                        const role = o.common.role as NSPanel.roles;
+                        switch (role) {
+                            case 'level.mode.fan':
+                            case 'socket':
+                            case 'light':
+                                let pageItem = findPageItem(id);
+                                // HIER FIX 2: Sicherstellen, dass pageItem gefunden wurde, bevor auf .monobutton zugegriffen wird
+                                if (pageItem && pageItem.monobutton != undefined && pageItem.monobutton == true) {
+                                    triggerButton(id + '.SET');
+                                } else {
+                                    setIfExists(id + '.SET', action);
+                                }
+                                break;
+                            case 'dimmer':
+                                setIfExists(id + '.ON_SET', action) ? true : setIfExists(id + '.ON_ACTUAL', action);
+                                break;
+                            case 'ct':
+                                setIfExists(id + '.ON', action);
+                                break;
+                            case 'rgb':
+                            case 'rgbSingle':
+                            case 'cie':
+                            case 'hue':
+                                setIfExists(id + '.ON', action);
+                                break;
+                            case 'switch.mode.wlan':
+                                setIfExists(id + '.SWITCH', action);
+                                GeneratePage(activePage!);
+                                break;
+                        }
+                    } else {
+                        if (Debug) log('HandleButtonEvent -> OnOff: Objekt ' + id + ' besitzt keine gültigen "common"-Eigenschaften.', 'warn');
                     }
                 }
                 break;
@@ -9492,11 +9707,13 @@ function HandleButtonEvent (words: any): void {
                 }
 
                 if (existsObject(id)) {
-                    let action = false;
-                    if (words[4] == '1') action = true;
-                    let o = getObject(id);
+                let action = false;
+                if (words[4] == '1') action = true;
+                let o = getObject(id);
 
-                    if (Debug) log(o.common.role)
+                // HIER FIX: Der umschließende Schutz sorgt dafür, dass o.common existiert
+                if (o && o.common) {
+                    if (Debug) log(o.common.role);
 
                     switch (o.common.role as NSPanel.roles) {
                         case 'level.mode.fan':
@@ -9609,7 +9826,7 @@ function HandleButtonEvent (words: any): void {
                                             let urlString: string = `${getState(adapterInstanceRepeat + 'info.host').val}/api/commands/?cmd=repeat`;
                                             axios
                                                 .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                                                .then(async function (response) {
+                                                .then(async function (response: any) {
                                                     if (response.status === 200) {
                                                         if (Debug) {
                                                             log(response.data, 'info');
@@ -9619,7 +9836,7 @@ function HandleButtonEvent (words: any): void {
                                                         log('Axios Status - adapterInstanceRepeat: ' + response.state, 'warn');
                                                     }
                                                 })
-                                                .catch(function (error) {
+                                                .catch(function (error: any) {
                                                     log(error, 'warn');
                                                 });
                                             break;
@@ -9646,8 +9863,11 @@ function HandleButtonEvent (words: any): void {
                                     }
                                 }
                             }
-                    }
-                }
+                        }
+                    } 
+                } else {
+                    if (Debug) log('Das Objekt für die ID ' + id + ' oder dessen "common"-Zweig wurde nicht gefunden.', 'warn');
+                } 
                 break;
             case 'up':
                 setIfExists(id + '.OPEN', true);
@@ -9663,34 +9883,39 @@ function HandleButtonEvent (words: any): void {
                 break;
             case 'button1Press':
                 let pageItemShutterButton1 = findPageItem(id);
-                if (pageItemShutterButton1.shutterIcons[0].buttonType != undefined && pageItemShutterButton1.shutterIcons[0].buttonType == 'toggle') {
-                    toggleState(pageItemShutterButton1.shutterIcons[0].id);
-                } else if (pageItemShutterButton1.shutterIcons[0].buttonType != undefined && pageItemShutterButton1.shutterIcons[0].buttonType == 'press') {
-                    setIfExists(pageItemShutterButton1.shutterIcons[0].id, true);
-                } else {
-                    //do nothing
+                if (pageItemShutterButton1 && pageItemShutterButton1.shutterIcons && pageItemShutterButton1.shutterIcons[0]) {
+                    const icon = pageItemShutterButton1.shutterIcons[0];
+                    if (icon.buttonType === 'toggle' && icon.id) {
+                        toggleState(icon.id);
+                    } else if (icon.buttonType === 'press' && icon.id) {
+                        setIfExists(icon.id, true);
+                    }
                 }
                 if (Debug) log("Shutter2 - Button1 Touch Press Event", 'info');
                 break;
+
             case 'button2Press':
                 let pageItemShutterButton2 = findPageItem(id);
-                if (pageItemShutterButton2.shutterIcons[1].buttonType != undefined && pageItemShutterButton2.shutterIcons[1].buttonType == 'toggle') {
-                    toggleState(pageItemShutterButton2.shutterIcons[1].id);
-                } else if (pageItemShutterButton2.shutterIcons[1].buttonType != undefined && pageItemShutterButton2.shutterIcons[1].buttonType == 'press') {
-                    setIfExists(pageItemShutterButton2.shutterIcons[1].id, true);
-                } else {
-                    //do nothing
+                if (pageItemShutterButton2 && pageItemShutterButton2.shutterIcons && pageItemShutterButton2.shutterIcons[1]) {
+                    const icon = pageItemShutterButton2.shutterIcons[1];
+                    if (icon.buttonType === 'toggle' && icon.id) {
+                        toggleState(icon.id);
+                    } else if (icon.buttonType === 'press' && icon.id) {
+                        setIfExists(icon.id, true);
+                    }
                 }
                 if (Debug) log("Shutter2 - Button2 Touch Press Event", 'info');
                 break;
+
             case 'button3Press':
                 let pageItemShutterButton3 = findPageItem(id);
-                if (pageItemShutterButton3.shutterIcons[2].buttonType != undefined && pageItemShutterButton3.shutterIcons[2].buttonType == 'toggle') {
-                    toggleState(pageItemShutterButton3.shutterIcons[2].id);
-                } else if (pageItemShutterButton3.shutterIcons[2].buttonType != undefined && pageItemShutterButton3.shutterIcons[2].buttonType == 'press') {
-                    setIfExists(pageItemShutterButton3.shutterIcons[2].id, true);
-                } else {
-                    //do nothing
+                if (pageItemShutterButton3 && pageItemShutterButton3.shutterIcons && pageItemShutterButton3.shutterIcons[2]) {
+                    const icon = pageItemShutterButton3.shutterIcons[2];
+                    if (icon.buttonType === 'toggle' && icon.id) {
+                        toggleState(icon.id);
+                    } else if (icon.buttonType === 'press' && icon.id) {
+                        setIfExists(icon.id, true);
+                    }
                 }
                 if (Debug) log("Shutter2 - Button3 Touch Press Event", 'info');
                 break;
@@ -9750,14 +9975,28 @@ function HandleButtonEvent (words: any): void {
                     if (existsObject(id)) {
                         let o = getObject(id);
                         let pageItem = findPageItem(id);
+                        
+                        // FIX: Sicherstellen, dass das Objekt 'o' und 'o.common' existieren
+                        if (!o || !o.common) {
+                            if (Debug) log('HandleButtonEvent -> brightnessSlider: Objekt oder common-Eigenschaft fehlt für ID: ' + id, 'warn');
+                            return;
+                        }
+
                         const role = o.common.role as NSPanel.roles;
+                        if (!role) return;
+
                         switch (role) {
                             case 'dimmer':
-                                if (pageItem.minValueBrightness != undefined && pageItem.maxValueBrightness != undefined) {
+                                // FIX: Prüfen, ob pageItem existiert, bevor auf Werte zugegriffen wird
+                                if (pageItem && pageItem.minValueBrightness != undefined && pageItem.maxValueBrightness != undefined) {
                                     let sliderPos = Math.trunc(scale(parseInt(words[4]), 0, 100, pageItem.maxValueBrightness, pageItem.minValueBrightness));
-                                    setIfExists(id + '.SET', sliderPos) ? true : setIfExists(id + '.ACTUAL', sliderPos);
+                                    if (!setIfExists(id + '.SET', sliderPos)) {
+                                        setIfExists(id + '.ACTUAL', sliderPos);
+                                    }
                                 } else {
-                                    setIfExists(id + '.SET', parseInt(words[4])) ? true : setIfExists(id + '.ACTUAL', parseInt(words[4]));
+                                    if (!setIfExists(id + '.SET', parseInt(words[4]))) {
+                                        setIfExists(id + '.ACTUAL', parseInt(words[4]));
+                                    }
                                 }
                                 break;
                             case 'rgb':
@@ -9765,7 +10004,8 @@ function HandleButtonEvent (words: any): void {
                             case 'rgbSingle':
                             case 'cie':
                             case 'hue':
-                                if (pageItem.minValueBrightness != undefined && pageItem.maxValueBrightness != undefined) {
+                                // FIX: Prüfen, ob pageItem existiert, bevor auf Werte zugegriffen wird
+                                if (pageItem && pageItem.minValueBrightness != undefined && pageItem.maxValueBrightness != undefined) {
                                     let sliderPos = Math.trunc(scale(parseInt(words[4]), 0, 100, pageItem.minValueBrightness, pageItem.maxValueBrightness));
                                     setIfExists(id + '.DIMMER', sliderPos);
                                 } else {
@@ -9803,6 +10043,16 @@ function HandleButtonEvent (words: any): void {
                     log('HandleButtonEvent colorWeel -> getHue-Werte: ' + getHue(rgb.red, rgb.green, rgb.blue), 'info');
                 }
                 let o = getObject(id);
+                            
+                // PRÜFUNG: Abbrechen, falls das Objekt oder 'common' nicht existiert
+                if (!o || !o.common) {
+                    if (Debug) {
+                        log('HandleButtonEvent colorWheel -> Objekt oder common-Eigenschaft fehlt für ID: ' + id, 'warn');
+                    }
+                    break;
+                }
+
+                // Sicherer Zugriff dank vorheriger Prüfung und Optional Chaining
                 switch (o.common.role as NSPanel.roles) {
                     case 'hue':
                         setIfExists(id + '.HUE', getHue(rgb.red, rgb.green, rgb.blue));
@@ -9814,9 +10064,11 @@ function HandleButtonEvent (words: any): void {
                         break;
                     case 'cie':
                         setIfExists(id + '.CIE', rgb_to_cie(rgb.red, rgb.green, rgb.blue));
+                        // Hinweis: Hier fehlte im Original ein 'break;', falls beabsichtigt
+                        break; 
                     case 'rgbSingle':
                         let pageItem = findPageItem(id);
-                        if (pageItem.colormode == 'xy') {
+                        if (pageItem && pageItem.colormode == 'xy') { // pageItem auch absichern
                             //For e.g. Deconz XY
                             setIfExists(id + '.RGB', rgb_to_cie(rgb.red, rgb.green, rgb.blue));
                             if (Debug) {
@@ -9827,8 +10079,8 @@ function HandleButtonEvent (words: any): void {
                             setIfExists(id + '.RGB', ConvertRGBtoHex(rgb.red, rgb.green, rgb.blue));
                         }
                         break;
-                }
-                break;
+                    }
+                    break;
             case 'tempUpd':
                 setIfExists(id + '.SET', parseInt(words[4]) / 10);
                 break;
@@ -10065,7 +10317,7 @@ function HandleButtonEvent (words: any): void {
                         let urlString: string = `${getState(adapterInstancePL + 'info.host').val}/api/commands/?cmd=playplaylist&name=${strDevicePL}`;
                         axios
                             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                            .then(async function (response) {
+                            .then(async function (response: any) {
                                 if (response.status === 200) {
                                     if (Debug) {
                                         log(JSON.stringify(response.data), 'info');
@@ -10074,7 +10326,7 @@ function HandleButtonEvent (words: any): void {
                                     log('Axios Status - mode-playlist: ' + response.state, 'warn');
                                 }
                             })
-                            .catch(function (error) {
+                            .catch(function (error: any) {
                                 log(error, 'warn');
                             });
                         break;
@@ -10132,7 +10384,7 @@ function HandleButtonEvent (words: any): void {
                         let urlString: string = `${getState(adapterInstanceTL + 'info.host').val}/api/commands/?cmd=play&N=${words[4]}`;
                         axios
                             .get(urlString, {headers: {'User-Agent': 'ioBroker'}})
-                            .then(async function (response) {
+                            .then(async function (response: any) {
                                 if (response.status === 200) {
                                     if (Debug) {
                                         log(JSON.stringify(response.data), 'info');
@@ -10208,36 +10460,47 @@ function HandleButtonEvent (words: any): void {
             case 'positionSlider1':
             case 'positionSlider2':
             case 'positionSlider3':
-                let newSliderVal: number = 0
+                let newSliderVal: number = 0;
                 let pageItemSlider = findPageItem(id);
-                if (isPageMediaItem(pageItemSlider)) {
-                    let adaInstanceSplit = pageItemSlider.adapterPlayerInstance!.split('.');
-                    if (adaInstanceSplit[0] == 'alexa2') {
-                        if (words[4] > 6) {
-                            newSliderVal = words[4] - 6;
-                        } else if (words[4] < 6) {
-                            newSliderVal = (6 - words[4]) * -1;
+                
+                // Sicherstellen, dass das PageItem überhaupt gefunden wurde
+                if (pageItemSlider) {
+                    if (isPageMediaItem(pageItemSlider)) {
+                        let adaInstanceSplit = pageItemSlider.adapterPlayerInstance!.split('.');
+                        if (adaInstanceSplit[0] == 'alexa2') {
+                            // HIER FIX: words[4] explizit in eine Zahl umwandeln, da Strings nicht mathematisch verglichen werden sollten
+                            const currentWordVal = Number(words[4]);
+                            if (currentWordVal > 6) {
+                                newSliderVal = currentWordVal - 6;
+                            } else if (currentWordVal < 6) {
+                                newSliderVal = (6 - currentWordVal) * -1;
+                            }
+                            
+                            if (Debug) log(words[3] + ': ' + newSliderVal);
+                            switch (words[3]) {
+                                case 'positionSlider1':
+                                    if (Debug) log(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerBass');
+                                    setState(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerBass', newSliderVal);
+                                    break;
+                                case 'positionSlider2':
+                                    if (Debug) log(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerMidRange');
+                                    setState(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerMidRange', newSliderVal);
+                                    break;
+                                case 'positionSlider3':
+                                    if (Debug) log(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerTreble');
+                                    setState(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerTreble', newSliderVal);
+                                    break;
+                            }
                         }
-                        if (Debug) log(words[3] + ': ' + newSliderVal);
-                        switch (words[3]) {
-                            case 'positionSlider1':
-                                if (Debug) log(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerBass');
-                                setState(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerBass', newSliderVal);
-                                break;
-                            case 'positionSlider2':
-                                if (Debug) log(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerMidRange');
-                                setState(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerMidRange', newSliderVal);
-                                break;
-                            case 'positionSlider3':
-                                if (Debug) log(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerTreble');
-                                setState(pageItemSlider.adapterPlayerInstance + 'Echo-Devices.' + pageItemSlider.mediaDevice + '.Preferences.equalizerTreble', newSliderVal);
-                                break;
-                        }
+                    } else {
+                        // HIER FIX: pageItemSlider existiert bereits oben, erneutes "let" entfernt.
+                        // Optionale Properties über den Nullish Coalescing Operator abgesichert, falls sie im PageItem fehlen.
+                        let maxVal = ('maxValueLevel' in pageItemSlider && pageItemSlider.maxValueLevel) ? (pageItemSlider.maxValue ?? 100) : 100;
+                        let minVal = ('minValueLevel' in pageItemSlider && pageItemSlider.minValueLevel) ? (pageItemSlider.minValue ?? 0) : 0;
+                        
+                        let sliderPos = Math.trunc(scale(parseInt(words[4]), 0, 100, maxVal, minVal));
+                        setIfExists(pageItemSlider.id + '.SET', sliderPos) ? true : setIfExists(id + '.ACTUAL', sliderPos);
                     }
-                } else {
-                     let pageItemSlider = findPageItem(id);
-                     let sliderPos = Math.trunc(scale(parseInt(words[4]), 0, 100, pageItemSlider.maxValueLevel ? pageItemSlider.maxValue : 100, pageItemSlider.minValueLevel ? pageItemSlider.minValue : 0));
-                     setIfExists(pageItemSlider.id + '.SET', sliderPos) ? true : setIfExists(id + '.ACTUAL', sliderPos);
                 }
                 break;
             case 'mode-seek':
@@ -10434,39 +10697,48 @@ function HandleButtonEvent (words: any): void {
                 break;
             case 'number-set':
                 let nobj = getObject(id);
-                switch (nobj.common.role as NSPanel.roles) {
-                    case 'level.mode.fan':
-                        (function () {
-                            if (timeoutSlider) {
-                                clearTimeout(timeoutSlider);
-                                timeoutSlider = null;
-                            }
-                        })();
-                        timeoutSlider = setTimeout(async function () {
-                            setIfExists(id + '.SPEED', parseInt(words[4]));
-                        }, 250);
-                        break;
-                    case 'slider':
-                        (function () {
-                            if (timeoutSlider) {
-                                clearTimeout(timeoutSlider);
-                                timeoutSlider = null;
-                            }
-                        })();
-                        timeoutSlider = setTimeout(async function () {
-                            setIfExists(id + '.SET', parseInt(words[4])) ? true : setIfExists(id + '.ACTUAL', parseInt(words[4]));
-                        }, 250);
-                    default:
-                        (function () {
-                            if (timeoutSlider) {
-                                clearTimeout(timeoutSlider);
-                                timeoutSlider = null;
-                            }
-                        })();
-                        timeoutSlider = setTimeout(async function () {
-                            setIfExists(id + '.SET', parseInt(words[4])) ? true : setIfExists(id + '.ACTUAL', parseInt(words[4]));
-                        }, 250);
-                        break;
+                
+                // Sicherstellen, dass das Objekt und das 'common'-Property existieren
+                if (nobj && nobj.common) {
+                    switch (nobj.common.role as NSPanel.roles) {
+                        case 'level.mode.fan':
+                            (function () {
+                                if (timeoutSlider) {
+                                    clearTimeout(timeoutSlider);
+                                    timeoutSlider = null;
+                                }
+                            })();
+                            timeoutSlider = setTimeout(async function () {
+                                setIfExists(id + '.SPEED', parseInt(words[4]));
+                            }, 250);
+                            break;
+                            
+                        case 'slider':
+                            (function () {
+                                if (timeoutSlider) {
+                                    clearTimeout(timeoutSlider);
+                                    timeoutSlider = null;
+                                }
+                            })();
+                            timeoutSlider = setTimeout(async function () {
+                                setIfExists(id + '.SET', parseInt(words[4])) ? true : setIfExists(id + '.ACTUAL', parseInt(words[4]));
+                            }, 250);
+                            break; // HIER FIX: 'break;' hinzugefügt, um Fall-Through in den Default-Zweig zu verhindern
+                            
+                        default:
+                            (function () {
+                                if (timeoutSlider) {
+                                    clearTimeout(timeoutSlider);
+                                    timeoutSlider = null;
+                                }
+                            })();
+                            timeoutSlider = setTimeout(async function () {
+                                setIfExists(id + '.SET', parseInt(words[4])) ? true : setIfExists(id + '.ACTUAL', parseInt(words[4]));
+                            }, 250);
+                            break;
+                    }
+                } else {
+                    if (Debug) log('getObject(' + id + ') lieferte kein gültiges Objekt zurück.', 'warn');
                 }
                 break;
             case 'mode-preset_modes':
@@ -10575,7 +10847,7 @@ function HandleButtonEvent (words: any): void {
  * @param {Partial<iobJS.StateCommon>} [common={}] - The common properties for the state (optional).
  * @param {iobJS.SetStateCallback} [callback] - The callback function to execute after setting or creating the state (optional).
  */
-function setOrCreate (id: string, value: any, forceCreation: boolean = true, common: Partial<iobJS.StateCommon> = {}, callback?: iobJS.SetStateCallback) {
+function setOrCreate (id: string, value: any, forceCreation: boolean = true, common: Partial<iobJS.StateCommon> = {}, callback?: iobJS.SetStateCallback) : void{
     if (!existsState(id)) {
         extendObject(id.split('.').slice(0, -2).join('.'), {type: 'channel', common: {name: 'channel'}, native: {}});
         extendObject(id.split('.').slice(0, -1).join('.'), {type: 'channel', common: {name: 'channel'}, native: {}});
@@ -10699,7 +10971,14 @@ function GenerateDetailPage (type: NSPanel.PopupType, optional: NSPanel.mediaOpt
         let id = pageItem.id;
 
         if (id && existsObject(id)) {
-            const o = getObject(id);
+            let o = getObject(id);
+                
+            // PRÜFUNG: Abbrechen, falls das Objekt oder 'common' nicht existiert
+            if (!o || !o.common) {
+                if (Debug) {
+                    log('HandleButtonEvent colorWheel -> Objekt oder common-Eigenschaft fehlt für ID: ' + id, 'warn');
+                }
+            }
             let val: boolean | number = 0;
             //let icon = Icons.GetIcon('lightbulb');
             let icon = pageItem.icon !== undefined ? Icons.GetIcon(pageItem.icon) : Icons.GetIcon('lightbulb');
@@ -11394,111 +11673,73 @@ function GenerateDetailPage (type: NSPanel.PopupType, optional: NSPanel.mediaOpt
                     const vTempAdapter = pageItem.adapterPlayerInstance!.split('.');
                     const vAdapter: NSPanel.PlayerType = vTempAdapter[0] as NSPanel.PlayerType;
 
-                    if (vAdapter == 'alexa2') {
+                    // HIER FIX: Prüfen ob equalizerSlider existiert und mindestens ein Element hat
+                    if (vAdapter == 'alexa2' && pageItem.equalizerSlider && pageItem.equalizerSlider[0]) {
+                        
+                        const eq = pageItem.equalizerSlider[0]; // Kurzschreibweise für sauberen Code
 
-                        let tSlider1: string = pageItem.equalizerSlider[0].Slider1.heading ?? "Bass";
-                        let tIconS1M: string = Icons.GetIcon(pageItem.equalizerSlider[0].Slider1.icon1 ?? "minus-box");
-                        let tIconS1P: string = Icons.GetIcon(pageItem.equalizerSlider[0].Slider1.icon2 ?? "plus-box");
-                        let hSlider1MinVal: number = pageItem.equalizerSlider[0].Slider1.minValue ?? 0;
-                        let hSlider1MaxVal: number = pageItem.equalizerSlider[0].Slider1.maxValue ?? 12;
-                        let hSlider1ZeroVal: number = pageItem.equalizerSlider[0].Slider1.zeroValue ?? 6;
-                        let hSlider1CurVal: number = getState(pageItem.adapterPlayerInstance! + 'Echo-Devices.' + pageItem.mediaDevice! + '.Preferences.equalizerBass').val + hSlider1ZeroVal;
-                        let hSlider1Step: number = pageItem.equalizerSlider[0].Slider1.stepValue ?? 1;
+                        // Slider 1
+                        let tSlider1: string = eq.Slider1?.heading ?? "Bass";
+                        let tIconS1M: string = Icons.GetIcon(eq.Slider1?.icon1 ?? "minus-box");
+                        let tIconS1P: string = Icons.GetIcon(eq.Slider1?.icon2 ?? "plus-box");
+                        let hSlider1MinVal: number = eq.Slider1?.minValue ?? 0;
+                        let hSlider1MaxVal: number = eq.Slider1?.maxValue ?? 12;
+                        let hSlider1ZeroVal: number = eq.Slider1?.zeroValue ?? 6;
+                        
+                        const stateS1 = getState(pageItem.adapterPlayerInstance! + 'Echo-Devices.' + pageItem.mediaDevice! + '.Preferences.equalizerBass');
+                        let hSlider1CurVal: number = (stateS1 && stateS1.val !== null ? Number(stateS1.val) : 0) + hSlider1ZeroVal;
+                        
+                        let hSlider1Step: number = eq.Slider1?.stepValue ?? 1;
                         let hSlider1Visibility: string = "enable";
 
-                        let tSlider2: string = pageItem.equalizerSlider[0].Slider2.heading ?? "MidRange";
-                        let tIconS2M: string = Icons.GetIcon(pageItem.equalizerSlider[0].Slider2.icon1 ?? "minus-box");
-                        let tIconS2P: string = Icons.GetIcon(pageItem.equalizerSlider[0].Slider2.icon2 ?? "plus-box");
-                        let hSlider2MinVal: number = pageItem.equalizerSlider[0].Slider2.minValue ?? 0;
-                        let hSlider2MaxVal: number = pageItem.equalizerSlider[0].Slider2.maxValue ?? 12;
-                        let hSlider2ZeroVal: number = pageItem.equalizerSlider[0].Slider2.zeroValue ?? 6;
-                        let hSlider2CurVal: number = getState(pageItem.adapterPlayerInstance! + 'Echo-Devices.' + pageItem.mediaDevice! + '.Preferences.equalizerMidRange').val + hSlider2ZeroVal;
-                        let hSlider2Step: number = pageItem.equalizerSlider[0].Slider2.stepValue ?? 1;
+                        // Slider 2
+                        let tSlider2: string = eq.Slider2?.heading ?? "MidRange";
+                        let tIconS2M: string = Icons.GetIcon(eq.Slider2?.icon1 ?? "minus-box");
+                        let tIconS2P: string = Icons.GetIcon(eq.Slider2?.icon2 ?? "plus-box");
+                        let hSlider2MinVal: number = eq.Slider2?.minValue ?? 0;
+                        let hSlider2MaxVal: number = eq.Slider2?.maxValue ?? 12;
+                        let hSlider2ZeroVal: number = eq.Slider2?.zeroValue ?? 6;
+                        
+                        const stateS2 = getState(pageItem.adapterPlayerInstance! + 'Echo-Devices.' + pageItem.mediaDevice! + '.Preferences.equalizerMidRange');
+                        let hSlider2CurVal: number = (stateS2 && stateS2.val !== null ? Number(stateS2.val) : 0) + hSlider2ZeroVal;
+                        
+                        let hSlider2Step: number = eq.Slider2?.stepValue ?? 1;
                         let hSlider2Visibility: string = "enable";
 
-                        let tSlider3: string = pageItem.equalizerSlider[0].Slider3.heading ?? "Treble";
-                        let tIconS3M: string = Icons.GetIcon(pageItem.equalizerSlider[0].Slider3.icon1 ?? "minus-box");
-                        let tIconS3P: string = Icons.GetIcon(pageItem.equalizerSlider[0].Slider3.icon2 ?? "plus-box");
-                        let hSlider3MinVal: number = pageItem.equalizerSlider[0].Slider3.minValue ?? 0;
-                        let hSlider3MaxVal: number = pageItem.equalizerSlider[0].Slider3.maxValue ?? 12;
-                        let hSlider3ZeroVal: number = pageItem.equalizerSlider[0].Slider3.zeroValue ?? 6;
-                        let hSlider3CurVal: number = getState(pageItem.adapterPlayerInstance! + 'Echo-Devices.' + pageItem.mediaDevice! + '.Preferences.equalizerTreble').val + hSlider3ZeroVal;
-                        let hSlider3Step: number = pageItem.equalizerSlider[0].Slider3.stepValue ?? 1;
+                        // Slider 3
+                        let tSlider3: string = eq.Slider3?.heading ?? "Treble";
+                        let tIconS3M: string = Icons.GetIcon(eq.Slider3?.icon1 ?? "minus-box");
+                        let tIconS3P: string = Icons.GetIcon(eq.Slider3?.icon2 ?? "plus-box");
+                        let hSlider3MinVal: number = eq.Slider3?.minValue ?? 0;
+                        let hSlider3MaxVal: number = eq.Slider3?.maxValue ?? 12;
+                        let hSlider3ZeroVal: number = eq.Slider3?.zeroValue ?? 6;
+                        
+                        const stateS3 = getState(pageItem.adapterPlayerInstance! + 'Echo-Devices.' + pageItem.mediaDevice! + '.Preferences.equalizerTreble');
+                        let hSlider3CurVal: number = (stateS3 && stateS3.val !== null ? Number(stateS3.val) : 0) + hSlider3ZeroVal;
+                        
+                        let hSlider3Step: number = eq.Slider3?.stepValue ?? 1;
                         let hSlider3Visibility: string = "enable";
 
                         out_msgs.push({
                             payload:
                                 'entityUpdateDetail' +
-                                '~' + //entityUpdateDetail
+                                '~' +
                                 tempId +
                                 '~' +
-                                // Slider1
-                                tSlider1 +           // Slider1 Headline --> tmSerial 2
-                                '~' +
-                                tIconS1M +           // Slider1 Left Icon --> tmSerial 3
-                                '~' +
-                                tIconS1P +           // Slider1 Right Icon --> tmSerial 4
-                                '~' +
-                                hSlider1CurVal +     // Slider1 Current Slider Value --> tmSerial 5
-                                '~' +
-                                hSlider1MinVal +     // Slider1 Minimal Slider Value --> tmSerial 6
-                                '~' +
-                                hSlider1MaxVal +     // Slider1 Maximal Slider Value --> tmSerial 7
-                                '~' +
-                                hSlider1ZeroVal +    // If Slider 0 is betweeb Min and Max --> tmSerial 8
-                                '~' +
-                                hSlider1Step +       // If Slider Tap >  --> tmSerial 9
-                                '~' +
-                                hSlider1Visibility   // If Slider Tap >  --> tmSerial 10
-                                // Slider2
-                                + '~' +
-                                tSlider2 +           // Slider2 Headline --> tmSerial 11
-                                '~' +
-                                tIconS2M +           // Slider2 Left Icon --> tmSerial 12
-                                '~' +
-                                tIconS2P +           // Slider2 Right Icon --> tmSerial 13
-                                '~' +
-                                hSlider2CurVal +     // Slider2 Current Slider Value --> tmSerial 14
-                                '~' +
-                                hSlider2MinVal +     // Slider2 Minimal Slider Value --> tmSerial 15
-                                '~' +
-                                hSlider2MaxVal +     // Slider2 Maximal Slider Value --> tmSerial 16
-                                '~' +
-                                hSlider2ZeroVal +    // If Slider2 0 is betweeb Min and Max --> tmSerial 17
-                                '~' +
-                                hSlider2Step +       // If Slider2 Tap > 1 --> tmSerial 18
-                                '~' +
-                                hSlider2Visibility   // If Slider Tap >  --> tmSerial 19
-                                // Slider3
-                                + '~' +
-                                tSlider3 +           // Slider3 Headline --> tmSerial 20
-                                '~' +
-                                tIconS3M +           // Slider3 Left Icon --> tmSerial 21
-                                '~' +
-                                tIconS3P +           // Slider3 Right Icon --> tmSerial 22
-                                '~' +
-                                hSlider3CurVal +     // Slider3 Current Slider Value --> tmSerial 23
-                                '~' +
-                                hSlider3MinVal +     // Slider2 Minimal Slider Value --> tmSerial 24
-                                '~' +
-                                hSlider3MaxVal +     // Slider2 Maximal Slider Value --> tmSerial 25
-                                '~' +
-                                hSlider3ZeroVal +    // If Slider3 0 is betweeb Min and Max --> tmSerial 26
-                                '~' +
-                                hSlider3Step +       // If Slider3 Tap > 1 --> tmSerial 27
-                                '~' +
-                                hSlider3Visibility   // If Slider Tap >  --> tmSerial 28
+                                tSlider1 + '~' + tIconS1M + '~' + tIconS1P + '~' + hSlider1CurVal + '~' + hSlider1MinVal + '~' + hSlider1MaxVal + '~' + hSlider1ZeroVal + '~' + hSlider1Step + '~' + hSlider1Visibility +
+                                '~' + tSlider2 + '~' + tIconS2M + '~' + tIconS2P + '~' + hSlider2CurVal + '~' + hSlider2MinVal + '~' + hSlider2MaxVal + '~' + hSlider2ZeroVal + '~' + hSlider2Step + '~' + hSlider2Visibility +
+                                '~' + tSlider3 + '~' + tIconS3M + '~' + tIconS3P + '~' + hSlider3CurVal + '~' + hSlider3MinVal + '~' + hSlider3MaxVal + '~' + hSlider3ZeroVal + '~' + hSlider3Step + '~' + hSlider3Visibility
                         });
                     }
-                } else { // no Media Item
+                } else { // no Media Item ...
 
                         let tSlider2: string = "";
                         let tIconS2M: string = Icons.GetIcon("minus-box"); 
                         let tIconS2P: string = Icons.GetIcon("plus-box");
-                        let hSlider2MinVal: number = pageItem.minValue ?? 0;
-                        let hSlider2MaxVal: number = pageItem.maxValue ?? 100;
+                        let hSlider2MinVal: number | undefined = pageItem.minValue ?? 0;
+                        let hSlider2MaxVal: number | undefined = pageItem.maxValue ?? 100;
                         let hSlider2ZeroVal: number = 0;
-                        let hSlider2CurVal: number = existsState(id + '.ACTUAL') ? getState(id + '.ACTUAL').val : getState(id + '.SET').val;
+                        let hSlider2CurVal: number | undefined = existsState(id + '.ACTUAL') ? getState(id + '.ACTUAL').val : getState(id + '.SET').val;
                         let hSlider2Step: number = 1;
                         let hSlider2Visibility: string = "enable";
 
@@ -11708,16 +11949,18 @@ function GenerateDetailPage (type: NSPanel.PopupType, optional: NSPanel.mediaOpt
                 let bEntity1Color : number = rgb_dec565(White);
                 let bEntity1Visibility : string = 'disable';
                 if (pageItem.shutterIcons && pageItem.shutterIcons[0] != undefined) {
-                    if (pageItem.shutterIcons[0].id != undefined) {
+                    const item = pageItem.shutterIcons[0]; // Kürzung für bessere Lesbarkeit
+                    if (item.id != undefined) {
                         bEntity1Visibility = 'enable';
-                        RegisterDetailEntityWatcher(pageItem.shutterIcons[0].id, pageItem, type, placeId);
-                        bEntity1State = getState(pageItem.shutterIcons[0].id).val;
+                        RegisterDetailEntityWatcher(item.id, pageItem, type, placeId);
+                        const state = getState(item.id);
+                        bEntity1State = state && state.val !== null ? !!state.val : false;
                         if (bEntity1State) {
-                            bEntity1Icon = Icons.GetIcon(pageItem.shutterIcons[0].icon) ?? bEntity1Icon;
-                            bEntity1Color = rgb_dec565(pageItem.shutterIcons[0].iconOnColor) ?? bEntity1Color;
+                            bEntity1Icon = Icons.GetIcon(item.icon ?? 'power');
+                            bEntity1Color = rgb_dec565(item.iconOnColor ?? White);
                         } else {
-                            bEntity1Icon = Icons.GetIcon(pageItem.shutterIcons[0].icon2) ?? bEntity1Icon;
-                            bEntity1Color = rgb_dec565(pageItem.shutterIcons[0].iconOffColor) ?? bEntity1Color;
+                            bEntity1Icon = Icons.GetIcon(item.icon2 ?? 'power');
+                            bEntity1Color = rgb_dec565(item.iconOffColor ?? White);
                         }
                     }
                 }
@@ -11728,16 +11971,18 @@ function GenerateDetailPage (type: NSPanel.PopupType, optional: NSPanel.mediaOpt
                 let bEntity2Color : number = rgb_dec565(White);
                 let bEntity2Visibility : string = 'disable';
                 if (pageItem.shutterIcons && pageItem.shutterIcons[1] != undefined) {
-                    if (pageItem.shutterIcons[1].id != undefined) {
+                    const item = pageItem.shutterIcons[1];
+                    if (item.id != undefined) {
                         bEntity2Visibility = 'enable';
-                        RegisterDetailEntityWatcher(pageItem.shutterIcons[1].id, pageItem, type, placeId);
-                        bEntity2State = getState(pageItem.shutterIcons[1].id).val;
+                        RegisterDetailEntityWatcher(item.id, pageItem, type, placeId);
+                        const state = getState(item.id);
+                        bEntity2State = state && state.val !== null ? !!state.val : false;
                         if (bEntity2State) {
-                            bEntity2Icon = Icons.GetIcon(pageItem.shutterIcons[1].icon) ?? bEntity2Icon;
-                            bEntity2Color = rgb_dec565(pageItem.shutterIcons[1].iconOnColor) ?? bEntity2Color;
+                            bEntity2Icon = Icons.GetIcon(item.icon ?? 'power');
+                            bEntity2Color = rgb_dec565(item.iconOnColor ?? White);
                         } else {
-                            bEntity2Icon = Icons.GetIcon(pageItem.shutterIcons[1].icon2) ?? bEntity2Icon;
-                            bEntity2Color = rgb_dec565(pageItem.shutterIcons[1].iconOffColor) ?? bEntity2Color;
+                            bEntity2Icon = Icons.GetIcon(item.icon2 ?? 'power');
+                            bEntity2Color = rgb_dec565(item.iconOffColor ?? White);
                         }
                     }
                 }
@@ -11748,16 +11993,18 @@ function GenerateDetailPage (type: NSPanel.PopupType, optional: NSPanel.mediaOpt
                 let bEntity3Color : number = rgb_dec565(White);
                 let bEntity3Visibility : string = 'disable';
                 if (pageItem.shutterIcons && pageItem.shutterIcons[2] != undefined) {
-                    if (pageItem.shutterIcons[2].id != undefined) {
+                    const item = pageItem.shutterIcons[2];
+                    if (item.id != undefined) {
                         bEntity3Visibility = 'enable';
-                        RegisterDetailEntityWatcher(pageItem.shutterIcons[2].id, pageItem, type, placeId);
-                        bEntity3State = getState(pageItem.shutterIcons[2].id).val;
+                        RegisterDetailEntityWatcher(item.id, pageItem, type, placeId);
+                        const state = getState(item.id);
+                        bEntity3State = state && state.val !== null ? !!state.val : false;
                         if (bEntity3State) {
-                            bEntity3Icon = Icons.GetIcon(pageItem.shutterIcons[2].icon) ?? bEntity3Icon;
-                            bEntity3Color = rgb_dec565(pageItem.shutterIcons[2].iconOnColor) ?? bEntity3Color;
+                            bEntity3Icon = Icons.GetIcon(item.icon ?? 'power');
+                            bEntity3Color = rgb_dec565(item.iconOnColor ?? White);
                         } else {
-                            bEntity3Icon = Icons.GetIcon(pageItem.shutterIcons[2].icon2) ?? bEntity3Icon;
-                            bEntity3Color = rgb_dec565(pageItem.shutterIcons[2].iconOffColor) ?? bEntity3Color;
+                            bEntity3Icon = Icons.GetIcon(item.icon2 ?? 'power');
+                            bEntity3Color = rgb_dec565(item.iconOffColor ?? White);
                         }
                     }
                 }
@@ -12582,13 +12829,18 @@ function HandleScreensaverUpdate (): void {
 			
 			            let val = getState(leftScreensaverEntity.ScreensaverEntity).val;
 			            let iconColor = rgb_dec565(White);
-			            let icon;
-			            if (typeof leftScreensaverEntity.ScreensaverEntityIconOn == 'string' && existsObject(leftScreensaverEntity.ScreensaverEntityIconOn as string)) {
-			                let iconName = getState(leftScreensaverEntity.ScreensaverEntityIconOn!).val;
-			                icon = Icons.GetIcon(iconName);
-			            } else {
-			                icon = Icons.GetIcon(leftScreensaverEntity.ScreensaverEntityIconOn);
-			            }
+
+                        let icon: string = ''; // Direkt als String initialisieren
+
+                        if (typeof leftScreensaverEntity.ScreensaverEntityIconOn == 'string' && existsObject(leftScreensaverEntity.ScreensaverEntityIconOn)) {
+                            const state = getState(leftScreensaverEntity.ScreensaverEntityIconOn);
+                            // Sicherstellen, dass der State existiert und den Wert in einen String umwandeln
+                            let iconName = (state && state.val !== null && state.val !== undefined) ? String(state.val) : '';
+                            icon = Icons.GetIcon(iconName);
+                        } else {
+                            // Fallback auf einen leeren String, falls die Property null oder undefined ist
+                            icon = Icons.GetIcon(leftScreensaverEntity.ScreensaverEntityIconOn ?? '');
+                        }
 			
 			            if (parseFloat(val + '') == val) {
 			                val = parseFloat(val);
@@ -12728,9 +12980,26 @@ function HandleScreensaverUpdate (): void {
                             WeatherIcon = existsObject('openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i-1) + '.icon')
                                 ? GetOpenWeatherMapIcon((getState('openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i-1) + '.icon').val).split('/').pop().split('.').shift())
                                 : '';
-                            WheatherColor = existsObject('openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i-1) + '.icon')
-                                ? GetOpenWeatherMapIconColor(String(getState('openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i-1) + '.icon').val).split('/').pop().split('.').shift())
-                                : 0;
+                                
+                            // 1. Den Pfad einmal sauber in eine Konstante legen
+                            const weatherIconPath = 'openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i - 1) + '.icon';
+
+                            let WheatherColor = 0;
+
+                            if (existsObject(weatherIconPath)) {
+                                const weatherState = getState(weatherIconPath);
+                                
+                                // Sicherstellen, dass der State existiert und einen Wert (.val) enthält
+                                if (weatherState && weatherState.val !== null && weatherState.val !== undefined) {
+                                    const iconValStr = String(weatherState.val);
+                                    const iconName = iconValStr.split('/').pop()?.split('.').shift();
+                                    
+                                    // Nur wenn das Splitten/Shiften einen validen String geliefert hat
+                                    if (iconName) {
+                                        WheatherColor = GetOpenWeatherMapIconColor(iconName);
+                                    }
+                                }
+                            }
 
                             RegisterScreensaverEntityWatcher('openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i-1) + '.temperatureMin');
                             RegisterScreensaverEntityWatcher('openweathermap.' + weatherAdapterInstanceNumber + '.forecast.day' + String(i-1) + '.temperatureMax');
@@ -12972,50 +13241,63 @@ function HandleScreensaverUpdate (): void {
                     }
                 }
 
-                //Alternativ Layout bekommt zusätzlichen Status
+                // Alternativ Layout bekommt zusätzlichen Status
                 if (config.bottomScreensaverEntity[4] && getState(NSPanel_Path + 'Config.Screensaver.alternativeScreensaverLayout').val) {
-                    let val = getState(config.bottomScreensaverEntity[4].ScreensaverEntity).val;
+                    const currentEntity = config.bottomScreensaverEntity[4]; // Code-Verkürzung für bessere Lesbarkeit
+                    
+                    // Sicherstellen, dass .val nicht null/undefined ist, bevor damit gearbeitet wird
+                    const stateVal = getState(currentEntity.ScreensaverEntity);
+                    let val = stateVal && stateVal.val !== null ? stateVal.val : '';
+                    
                     if (parseFloat(val + '') == val) {
-                        val = parseFloat(val);
+                        val = parseFloat(val + '');
                     }
+                    
                     let iconColor = rgb_dec565(White);
                     if (typeof val == 'number') {
-                        val =
-                            (val * (config.bottomScreensaverEntity[4].ScreensaverEntityFactor ? config.bottomScreensaverEntity[4].ScreensaverEntityFactor : 0)).toFixed(
-                                config.bottomScreensaverEntity[4].ScreensaverEntityDecimalPlaces
-                            ) + config.bottomScreensaverEntity[4].ScreensaverEntityUnitText;
-                        iconColor = GetScreenSaverEntityColor(config.bottomScreensaverEntity[4]);
+                        // HIER FIX: ?? 0 für den Fall, dass DecimalPlaces null/undefined ist
+                        val = (val * (currentEntity.ScreensaverEntityFactor ? currentEntity.ScreensaverEntityFactor : 0))
+                            .toFixed(currentEntity.ScreensaverEntityDecimalPlaces ?? 0) + (currentEntity.ScreensaverEntityUnitText ?? '');
+                        iconColor = GetScreenSaverEntityColor(currentEntity);
                     } else if (typeof val == 'boolean') {
-                        iconColor = GetScreenSaverEntityColor(config.bottomScreensaverEntity[4]);
+                        iconColor = GetScreenSaverEntityColor(currentEntity);
                     } else if (typeof val == 'string') {
-                        iconColor = GetScreenSaverEntityColor(config.bottomScreensaverEntity[4]);
+                        iconColor = GetScreenSaverEntityColor(currentEntity);
 
                         let pformat = ['L', 'LL', 'LLL', 'LLLL'];
                         if (Debug) log('moments.js --> Datum ' + val + ' valid?: ' + moment(val, pformat, true).isValid(), 'info');
                         if (moment(val, pformat, true).isValid()) {
                             let DatumZeit = moment(val, pformat).unix(); // Conversion to Unix time stamp
-                            if (config.bottomScreensaverEntity[4].ScreensaverEntityDateFormat !== undefined) {
-                                val = new Date(DatumZeit * 1000).toLocaleString(getState(NSPanel_Path + 'Config.locale').val, config.bottomScreensaverEntity[4].ScreensaverEntityDateFormat);
+                            const localeState = getState(NSPanel_Path + 'Config.locale');
+                            const locale = localeState && localeState.val ? String(localeState.val) : 'de-DE';
+                            
+                            if (currentEntity.ScreensaverEntityDateFormat !== undefined) {
+                                val = new Date(DatumZeit * 1000).toLocaleString(locale, currentEntity.ScreensaverEntityDateFormat);
                             } else {
-                                val = new Date(DatumZeit * 1000).toLocaleString(getState(NSPanel_Path + 'Config.locale').val);
+                                val = new Date(DatumZeit * 1000).toLocaleString(locale);
                             }
                         }
                     }
-                    const temp = config.bottomScreensaverEntity[4].ScreensaverEntityIconColor;
+                    
+                    const temp = currentEntity.ScreensaverEntityIconColor;
                     if (temp && typeof temp == 'string' && existsObject(temp)) {
-                        iconColor = getState(temp).val;
+                        const tempState = getState(temp);
+                        iconColor = tempState && tempState.val !== null ? tempState.val : iconColor;
                     }
+                    
                     payloadString +=
                         '~' +
                         '~' +
-                        Icons.GetIcon(config.bottomScreensaverEntity[4].ScreensaverEntityIconOn) +
+                        // HIER FIX: ?? '' hinzugefügt, um den String-Typ für Icons.GetIcon zu garantieren
+                        Icons.GetIcon(currentEntity.ScreensaverEntityIconOn ?? '') +
                         '~' +
                         iconColor +
                         '~' +
-                        config.bottomScreensaverEntity[4].ScreensaverEntityText +
+                        (currentEntity.ScreensaverEntityText ?? '') +
                         '~' +
                         val;
                 } // Ende zusätzlichen Status Alternativ Layout
+                
             } else {
                 // USER definierte Bottom Entities
                 let checkpoint = true;
@@ -13032,13 +13314,18 @@ function HandleScreensaverUpdate (): void {
                     if (parseFloat(val + '') == val) {
                         val = parseFloat(val);
                     }
-                    let iconColor = rgb_dec565(White);
-                    let icon;
-                    if (entity.ScreensaverEntityIconOn && existsObject(entity.ScreensaverEntityIconOn!)) {
-                        let iconName = getState(entity.ScreensaverEntityIconOn!).val;
+
+                    let iconColor: number = rgb_dec565(White);
+                    let icon: string = ''; // Direkt als String initialisieren
+
+                    if (entity.ScreensaverEntityIconOn && existsObject(entity.ScreensaverEntityIconOn)) {
+                        const state = getState(entity.ScreensaverEntityIconOn);
+                        // Sicherstellen, dass der State existiert und den Wert in einen String umwandeln
+                        let iconName = (state && state.val !== null && state.val !== undefined) ? String(state.val) : '';
                         icon = Icons.GetIcon(iconName);
                     } else {
-                        icon = Icons.GetIcon(entity.ScreensaverEntityIconOn);
+                        // Fallback auf einen leeren String, falls die Property null oder undefined ist
+                        icon = Icons.GetIcon(entity.ScreensaverEntityIconOn ?? '');
                     }
 
                     if (typeof val == 'number') {
@@ -13106,12 +13393,16 @@ function HandleScreensaverUpdate (): void {
                     }
                     let iconColor = rgb_dec565(White);
 
-                    let icon;
-                    if (indicatorScreensaverEntity.ScreensaverEntityIconOn && existsObject(indicatorScreensaverEntity.ScreensaverEntityIconOn!)) {
-                        let iconName = getState(indicatorScreensaverEntity.ScreensaverEntityIconOn!).val;
+                    let icon: string = ''; // Direkt als String initialisieren
+
+                    if (indicatorScreensaverEntity.ScreensaverEntityIconOn && existsObject(indicatorScreensaverEntity.ScreensaverEntityIconOn)) {
+                        const state = getState(indicatorScreensaverEntity.ScreensaverEntityIconOn);
+                        // Sicherstellen, dass der Zustand existiert und einen Wert hat
+                        let iconName = (state && state.val !== null && state.val !== undefined) ? String(state.val) : '';
                         icon = Icons.GetIcon(iconName);
                     } else {
-                        icon = Icons.GetIcon(indicatorScreensaverEntity.ScreensaverEntityIconOn);
+                        // Fallback auf leeren String, falls die Property null/undefined ist
+                        icon = Icons.GetIcon(indicatorScreensaverEntity.ScreensaverEntityIconOn ?? '');
                     }
 
                     if (typeof val == 'number') {
@@ -13189,9 +13480,9 @@ function HandleScreensaverStatusIcons (): void {
                 ScreensaverEntityIconOff: config.mrIcon1ScreensaverEntity.ScreensaverEntityIconOff ? Icons.GetIcon(config.mrIcon1ScreensaverEntity.ScreensaverEntityIconOff) : '',
                 ScreensaverEntityOnColor: config.mrIcon1ScreensaverEntity.ScreensaverEntityOnColor,
                 ScreensaverEntityOffColor: config.mrIcon1ScreensaverEntity.ScreensaverEntityOffColor,
-                ScreensaverEntityValue: config.mrIcon1ScreensaverEntity.ScreensaverEntityValue === null ? null : getState(config.mrIcon1ScreensaverEntity.ScreensaverEntityValue).val,
+                ScreensaverEntityValue: config.mrIcon1ScreensaverEntity.ScreensaverEntityValue === null ? null : (getState(config.mrIcon1ScreensaverEntity.ScreensaverEntityValue).val ?? null),
                 ScreensaverEntityValueDecimalPlace: config.mrIcon1ScreensaverEntity.ScreensaverEntityValueDecimalPlace,
-                ScreensaverEntityValueUnit: config.mrIcon1ScreensaverEntity.ScreensaverEntityValueUnit,
+                ScreensaverEntityValueUnit: config.mrIcon1ScreensaverEntity.ScreensaverEntityValueUnit ?? null, // <--- Hier ändern
                 ScreensaverEntityIconSelect:
                     config.mrIcon1ScreensaverEntity.ScreensaverEntityIconSelect && typeof config.mrIcon1ScreensaverEntity.ScreensaverEntityIconSelect === 'object'
                         ? config.mrIcon1ScreensaverEntity.ScreensaverEntityIconSelect
@@ -13206,23 +13497,30 @@ function HandleScreensaverStatusIcons (): void {
                 ScreensaverEntityIconOff: config.mrIcon2ScreensaverEntity.ScreensaverEntityIconOff ? Icons.GetIcon(config.mrIcon2ScreensaverEntity.ScreensaverEntityIconOff) : '',
                 ScreensaverEntityOnColor: config.mrIcon2ScreensaverEntity.ScreensaverEntityOnColor,
                 ScreensaverEntityOffColor: config.mrIcon2ScreensaverEntity.ScreensaverEntityOffColor,
-                ScreensaverEntityValue: config.mrIcon2ScreensaverEntity.ScreensaverEntityValue === null ? null : getState(config.mrIcon2ScreensaverEntity.ScreensaverEntityValue).val,
+                ScreensaverEntityValue: config.mrIcon2ScreensaverEntity.ScreensaverEntityValue === null ? null : (getState(config.mrIcon2ScreensaverEntity.ScreensaverEntityValue).val ?? null),
                 ScreensaverEntityValueDecimalPlace: config.mrIcon2ScreensaverEntity.ScreensaverEntityValueDecimalPlace,
-                ScreensaverEntityValueUnit: config.mrIcon2ScreensaverEntity.ScreensaverEntityValueUnit,
+                ScreensaverEntityValueUnit: config.mrIcon2ScreensaverEntity.ScreensaverEntityValueUnit ?? null, // <--- Hier ändern
                 ScreensaverEntityIconSelect:
                     config.mrIcon2ScreensaverEntity.ScreensaverEntityIconSelect && typeof config.mrIcon2ScreensaverEntity.ScreensaverEntityIconSelect === 'object'
                         ? config.mrIcon2ScreensaverEntity.ScreensaverEntityIconSelect
                         : null,
             },
         };
+
         for (const a in iconData) {
-            if (iconData[a].ScreensaverEntityValue !== null) {
-                switch (typeof iconData[a].ScreensaverEntityValue) {
+            // 1. Deklaration direkt zu Beginn der Schleife setzen
+            const key = a as keyof typeof iconData;
+            const currentIconData = iconData[key];
+
+            // 2. Formatierung der Werte (jetzt typsicher über currentIconData)
+            if (currentIconData.ScreensaverEntityValue !== null) {
+                switch (typeof currentIconData.ScreensaverEntityValue) {
                     case 'string':
-                        if (iconData[a].ScreensaverEntityValue === '' || isNaN(iconData[a].ScreensaverEntityValue)) break;
+                        if (currentIconData.ScreensaverEntityValue === '' || isNaN(Number(currentIconData.ScreensaverEntityValue))) break;
                     case 'number':
                     case 'bigint':
-                        iconData[a].ScreensaverEntityValue = Number(iconData[a].ScreensaverEntityValue).toFixed(iconData[a].ScreensaverEntityValueDecimalPlace);
+                        // HIER FIX: ?? 0 hinzugefügt, um null abzufangen
+                        currentIconData.ScreensaverEntityValue = Number(currentIconData.ScreensaverEntityValue).toFixed(currentIconData.ScreensaverEntityValueDecimalPlace ?? 0);
                         break;
                     case 'boolean':
                         break;
@@ -13230,68 +13528,73 @@ function HandleScreensaverStatusIcons (): void {
                     case 'undefined':
                     case 'object':
                     case 'function':
-                        iconData[a].ScreensaverEntityValue = null;
+                        currentIconData.ScreensaverEntityValue = null;
                 }
             }
-            let hwBtn1Col: RGB = iconData[a].ScreensaverEntityOffColor;
-            if (iconData[a].ScreensaverEntity != null || iconData[a].ScreensaverEntityValue != null) {
+            // 3. Farb-Ermittlung
+            let hwBtn1Col: RGB = currentIconData.ScreensaverEntityOffColor;
+
+            if (currentIconData.ScreensaverEntity != null || currentIconData.ScreensaverEntityValue != null) {
                 // Prüfung ob ScreensaverEntity vom Typ String ist
-                if (iconData[a].ScreensaverEntity != null) {
-                    if (typeof iconData[a].ScreensaverEntity == 'string') {
+                if (currentIconData.ScreensaverEntity != null) {
+                    if (typeof currentIconData.ScreensaverEntity == 'string') {
                         if (Debug) log('Entity ist String', 'info');
-                        switch (String(iconData[a].ScreensaverEntity).toUpperCase()) {
+                        switch (String(currentIconData.ScreensaverEntity).toUpperCase()) {
                             case 'ON':
                             case 'OK':
                             case 'AN':
                             case 'YES':
                             case 'TRUE':
                             case 'ONLINE':
-                                hwBtn1Col = iconData[a].ScreensaverEntityOnColor;
+                                hwBtn1Col = currentIconData.ScreensaverEntityOnColor;
                                 break;
                             default:
                         }
-                        if (Debug) log('Value: ' + iconData[a].ScreensaverEntity + ' Color: ' + JSON.stringify(hwBtn1Col), 'info');
+                        if (Debug) log('Value: ' + currentIconData.ScreensaverEntity + ' Color: ' + JSON.stringify(hwBtn1Col), 'info');
                         // Alles was kein String ist in Boolean umwandeln
                     } else {
                         if (Debug) log('Entity ist kein String', 'info');
-                        if (!!iconData[a].ScreensaverEntity) {
-                            hwBtn1Col = iconData[a].ScreensaverEntityOnColor;
+                        if (!!currentIconData.ScreensaverEntity) {
+                            hwBtn1Col = currentIconData.ScreensaverEntityOnColor;
                         }
                     }
                 }
 
-                // Icon ermitteln
-                if (iconData[a].ScreensaverEntityIconSelect && iconData[a].ScreensaverEntity != null) {
-                    const icon = iconData[a].ScreensaverEntityIconSelect[iconData[a].ScreensaverEntity];
+                // 4. Icon ermitteln
+                if (currentIconData.ScreensaverEntityIconSelect && currentIconData.ScreensaverEntity != null) {
+                    // Konvertiert das Boolean in einen String-Index ('true' / 'false')
+                    const icon = currentIconData.ScreensaverEntityIconSelect[currentIconData.ScreensaverEntity.toString()];
                     if (icon !== undefined) {
                         payloadString += Icons.GetIcon(icon);
                         if (Debug) log('SelectIcon: ' + payloadString, 'info');
                     }
-                } else if (iconData[a].ScreensaverEntity) {
-                    payloadString += iconData[a].ScreensaverEntityIconOn;
+                } else if (currentIconData.ScreensaverEntity) {
+                    payloadString += currentIconData.ScreensaverEntityIconOn;
                     if (Debug) log('Icon if true ' + payloadString, 'info');
                 } else {
-                    if (iconData[a].ScreensaverEntityIconOff) {
-                        payloadString += iconData[a].ScreensaverEntityIconOff;
+                    if (currentIconData.ScreensaverEntityIconOff) {
+                        payloadString += currentIconData.ScreensaverEntityIconOff;
                         if (Debug) log('Icon1 else true ' + payloadString, 'info');
                     } else {
-                        payloadString += iconData[a].ScreensaverEntityIconOn;
+                        payloadString += currentIconData.ScreensaverEntityIconOn;
                         if (Debug) log('Icon1 else false ' + payloadString, 'info');
                     }
                 }
-
-                if (iconData[a].ScreensaverEntityValue != null) {
-                    payloadString += iconData[a].ScreensaverEntityValue;
-                    payloadString += iconData[a].ScreensaverEntityValueUnit == null ? '' : iconData[a].ScreensaverEntityValueUnit;
+                
+                // 5. Value und Unit an den Payload hängen
+                if (currentIconData.ScreensaverEntityValue != null) {
+                    payloadString += currentIconData.ScreensaverEntityValue;
+                    payloadString += currentIconData.ScreensaverEntityValueUnit == null ? '' : currentIconData.ScreensaverEntityValueUnit;
                 }
 
                 payloadString += '~' + rgb_dec565(hwBtn1Col) + '~';
             } else {
+                // Falls weder Entity noch Value existieren
                 hwBtn1Col = Black;
                 payloadString += '~~';
             }
         }
-
+        
         let alternateScreensaverMFRIcon1Size: boolean = true;
         let alternateScreensaverMFRIcon2Size: boolean = true;
         if (existsState(NSPanel_Path + 'Config.MRIcons.alternateMRIconSize.1')) {
@@ -14681,7 +14984,7 @@ function kelvinToRGB (colorTemperature: number): RGB {
  * @param rad radians to convert, expects rad in range +/- PI per Math.atan2
  * @returns {number} degrees equivalent of rad
  */
-function rad2deg (rad): number {
+function rad2deg (rad: any): number {
     return (360 + (180 * rad) / Math.PI) % 360;
 }
 
@@ -14694,7 +14997,7 @@ function rad2deg (rad): number {
  * @param {number} color - The color value to convert.
  * @returns {string} The hexadecimal string representation of the color.
  */
-function ColorToHex (color): string {
+function ColorToHex (color: any): string {
     let hexadecimal: string = color.toString(16);
     return hexadecimal.length == 1 ? '0' + hexadecimal : hexadecimal;
 }
@@ -14972,14 +15275,15 @@ function determineStatusIcon (
         return iconId;
     }
 
-    function pickIcon(iconKey?: string, defIndex?: number): string {
-        return (
-            (iconKey && existsState(iconKey) && Icons.GetIcon(getState(iconKey).val)) ||
-            Icons.GetIcon(iconKey) ||
-            (def && defIndex !== undefined ? Icons.GetIcon(def[defIndex]) : undefined) ||
-            iconId
-        );
-    }
+function pickIcon(iconKey?: string, defIndex?: number): string {
+    const key = iconKey ?? ''; // Oder ein passender Fallback-String
+    return (
+        (iconKey && existsState(key) && Icons.GetIcon(getState(key).val)) ||
+        Icons.GetIcon(key) ||
+        (def && defIndex !== undefined ? Icons.GetIcon(def[defIndex]) : undefined) ||
+        iconId
+    );
+}
 
     if ((min > max && val >= min) || (min <= max && val <= min)) {
         iconId = pickIcon(icon1, 0);
@@ -15066,7 +15370,7 @@ function adapterSchedule (time: {hour?: number; minute?: number} | undefined | n
  * @param {Function} callback - The callback function to execute.
  * @param {boolean} [init=false] - Whether to initialize the task immediately.
  */
-function _schedule (time: {hour?: number; minute?: number} | undefined | number, ref: number, repeatTime: number, callback, init: boolean = false) {
+function _schedule (time: {hour?: number; minute?: number} | undefined | number, ref: number, repeatTime: number, callback: any, init: boolean = false) {
     if (!scheduleList[ref]) return;
     if (!init) callback();
     let targetTime: number;
@@ -15384,6 +15688,7 @@ namespace NSPanel {
         hiddenByTrigger?: boolean;
         thermoItems?: any;
         alwaysOnDisplay?: boolean;
+        showOnlyPlayerHeadline?: boolean;
     };
 
     export type PagetypeType = 'cardChart' | 'cardLChart' | 'cardEntities' | 'cardSchedule' | 'cardGrid' | 'cardGrid2' | 'cardGrid3' | 'cardThermo' | 'cardThermo2' | 'cardMedia' | 'cardUnlock' | 'cardQR' | 'cardAlarm' | 'cardPower'; //| 'cardBurnRec'
@@ -15565,6 +15870,7 @@ namespace NSPanel {
         fontSize?: number;
         actionStringArray?: string[];
         alwaysOnDisplay?: boolean;
+        showOnlyPlayerHeadline?: boolean;
         popupVersion?: number;
         shutterType?: string;
         shutterZeroIsClosed?: boolean;
@@ -15600,7 +15906,7 @@ namespace NSPanel {
     };
 
     export type ConfigButtonFunction = {
-        mode: 'page' | 'toggle' | 'set' | null;
+        mode: 'page' | 'toggle' | 'set' | null | any;
         page: PageThermo | PageThermo2 | PageMedia | PageAlarm | PageQR | PageEntities | PageSchedule | PageGrid | PageGrid2 | PageGrid3 | PagePower | PageChart | PageUnlock | null;
         entity: string | null;
         setValue: string | number | boolean | null;
@@ -15787,4 +16093,13 @@ namespace NSPanel {
         | `${PlayerType}.9.`;
 
     export type mediaOptional = 'seek' | 'crossfade' | 'speakerlist' | 'playlist' | 'tracklist' | 'equalizer' | 'repeat' | 'favorites';
+}
+
+interface PowerItem {
+    iconColor: number | string; // oder RGB, je nach dem, was es ist
+    icon: string;
+    speed: string;
+    value: string;
+    unit: string;
+    // ... 
 }
