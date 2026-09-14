@@ -175,6 +175,10 @@ class HAEntity(panel_cards.Entity):
                 entity_type_panel = "timer"
                 value = get_translation(
                     self.locale, f"backend.component.timer.state._.{self.state}")
+            case 'input_datetime':
+                if self.attributes.get("has_time") and not self.attributes.get("has_date"):
+                    entity_type_panel = "datetime"
+                    value = self.state
             case 'alarm_control_panel':
                 value = get_translation(
                     self.locale, f"frontend.state_badge.alarm_control_panel.{self.state}")
