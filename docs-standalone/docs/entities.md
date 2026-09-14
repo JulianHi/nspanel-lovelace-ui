@@ -14,6 +14,8 @@ key | required | type | description
 `font` | no | string | Icon font variant (`small`, `medium`, `medium-icon`, `large`).
 `status` | no | string | Extra status entity for `navigate.*` items.
 `effectList` | no | list | Custom light effect list for detail popup.
+`toggle_entity` | no | string | Optional enable/disable toggle shown in the `input_datetime` detail popup, acting on this entity (any toggleable domain: `input_boolean`, `switch`, `automation`, ...).
+`subtitle` | no | string | Optional instruction/description line shown in the `input_datetime` detail popup.
 `attribute` | no | string | Weather attribute to display.
 `day` | no | int | Weather daily forecast index.
 `hour` | no | int | Weather hourly forecast index.
@@ -37,6 +39,7 @@ key | required | type | description
 - `number`
 - `input_number`
 - `timer`
+- `input_datetime`
 - `alarm_control_panel`
 - `vacuum`
 - `media_player`

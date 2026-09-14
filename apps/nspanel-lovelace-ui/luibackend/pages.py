@@ -386,6 +386,10 @@ class LuiPagesGen(object):
         elif entityType == "timer":
             entityTypePanel = "timer"
             value = get_translation(self._locale, f"backend.component.timer.state._.{entity.state}")
+        elif entityType == "input_datetime":
+            if entity.attributes.get("has_time") and not entity.attributes.get("has_date"):
+                entityTypePanel = "datetime"
+                value = entity.state
         elif entityType == "weather":
             entityTypePanel = "text"
             unit = get_attr_safe(entity, "temperature_unit", "")
@@ -446,7 +450,7 @@ class LuiPagesGen(object):
         if self._locale == "he_IL" and any("\u0590" <= c <= "\u05EA" for c in name):
             name = name[::-1]
         # use uuid instead for some types and probably expand on this in future
-        if entityType in ["light"]:
+        if entityType in ["light", "input_datetime"]:
             entityId = uuid
         # remove stuff defined in mask
         if mask is not None:
@@ -1092,6 +1096,27 @@ class LuiPagesGen(object):
             label2  = get_translation(self._locale, "frontend.ui.card.timer.actions.cancel")
             label3  = get_translation(self._locale, "frontend.ui.card.timer.actions.finish")
         self._send_mqtt_msg(f"entityUpdateDetail~{entity_id}~~{icon_color}~{entity_id}~{min_remaining}~{sec_remaining}~{editable}~{action1}~{action2}~{action3}~{label1}~{label2}~{label3}", force=is_open_detail)
+
+    def generate_datetime_detail_page(self, entity_id, is_open_detail=False):
+        entity_config = None
+        if entity_id.startswith('uuid'):
+            entity_config = self._config._config_entites_table.get(entity_id)
+            entity = apis.ha_api.get_entity(entity_config.entityId)
+        else:
+            entity = apis.ha_api.get_entity(entity_id)
+        if entity.state.count(":") != 2 or not entity.attributes.get("has_time") or entity.attributes.get("has_date"):
+            return
+        icon_color = self.get_entity_color(entity)
+        hour, minute, _second = entity.state.split(":")
+        toggle_entity_id = ""
+        toggle_state = 0
+        subtitle = ""
+        if entity_config is not None:
+            toggle_entity_id = entity_config.entity_input_config.get("toggle_entity") or ""
+            subtitle = entity_config.entity_input_config.get("subtitle") or ""
+            if toggle_entity_id and apis.ha_api.entity_exists(toggle_entity_id):
+                toggle_state = 1 if apis.ha_api.get_state(toggle_entity_id) == "on" else 0
+        self._send_mqtt_msg(f"entityUpdateDetail~{entity_id}~~{icon_color}~{entity_id}~{int(hour)}~{int(minute)}~{toggle_entity_id}~{toggle_state}~{subtitle}", force=is_open_detail)
 
     def send_message_page(self, ident, heading, msg, b1, b2):
         self._send_mqtt_msg(f"pageType~popupNotify")

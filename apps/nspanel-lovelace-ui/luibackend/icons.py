@@ -143,7 +143,8 @@ simple_type_mapping = {
     'fan':          'fan',
     'person':       'account',
     'vacuum':       'robot-vacuum',
-    'timer':        'timer-outline'
+    'timer':        'timer-outline',
+    'input_datetime': 'clock-outline'
 
 }
 
