@@ -9,6 +9,15 @@ panels.yaml
 # don't add Webstorm project stuff
 .idea
 
+# AI assistant tool files/output
+.claude/
+docs/superpowers/
+CLAUDE.md
+AGENTS.md
+.cursor/
+.windsurf/
+.aider*
+
 # General
 .DS_Store
 __MACOSX/
