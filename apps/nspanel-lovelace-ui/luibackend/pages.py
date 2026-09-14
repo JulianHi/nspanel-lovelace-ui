@@ -1104,10 +1104,12 @@ class LuiPagesGen(object):
             entity = apis.ha_api.get_entity(entity_config.entityId)
         else:
             entity = apis.ha_api.get_entity(entity_id)
+        if entity.state.count(":") != 2 or not entity.attributes.get("has_time") or entity.attributes.get("has_date"):
+            return
         icon_color = self.get_entity_color(entity)
         hour, minute, _second = entity.state.split(":")
         toggle_entity_id = ""
-        toggle_state = ""
+        toggle_state = 0
         subtitle = ""
         if entity_config is not None:
             toggle_entity_id = entity_config.entity_input_config.get("toggle_entity") or ""

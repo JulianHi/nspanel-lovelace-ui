@@ -898,6 +898,8 @@ def detail_open(locale, detail_type, ha_entity_id, entity_id, msg_out_queue, sen
 
 
         case 'popupDatetime' | 'input_datetime':
+            if not attributes.get("has_time") or attributes.get("has_date") or state.count(":") != 2:
+                return
             icon_color = ha_colors.get_entity_color("input_datetime", state, attributes)
             hour, minute, _second = state.split(":")
             toggle_entity_id = toggle_entity or ""
