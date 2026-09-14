@@ -2611,6 +2611,14 @@ in case action is empty the button will be hidden
 
 `entityUpdateDetail~{entity_id}~~{icon_color}~{entity_id}~{min_remaining}~{sec_remaining}~{editable}~{action1}~{action2}~{action3}~{label1}~{label2}~{label3}`
 
+### popupDatetime
+
+For `input_datetime` entities configured time-only (`has_time: true`, `has_date: false`).
+
+`toggle_entity`/`toggle_state` are empty strings when no `toggle_entity` is configured for this item (the toggle row is hidden on the display in that case). Same for `subtitle`.
+
+`entityUpdateDetail~{entity_id}~~{icon_color}~{entity_id}~{hour}~{minute}~{toggle_entity}~{toggle_state}~{subtitle}`
+
 
 
 
@@ -2694,6 +2702,14 @@ in case action is empty the button will be hidden
 ### cardAlarm Page
 
 `event,buttonPress2,internalNameEntity,actionName,code`
+
+### popupDatetime Page
+
+`event,pageOpenDetail,popupDatetime,internalNameEntity`
+
+`event,buttonPress2,internalNameEntity,datetime-set,07:30`
+
+`event,buttonPress2,toggleInternalNameEntity,OnOff,1`
 
 
 # Custom Protocol

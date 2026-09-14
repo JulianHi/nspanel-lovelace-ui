@@ -20,6 +20,8 @@ key | optional | type | default | description
 `action_name` | True | string | `None` | Only valid for script; Button label
 `font` | True | string | `None` | Used to change the font for cardGrid Icons; valid values are (`small`, `medium-icon` and `medium`). Currently only supported for homeassistant entities and not for internal ones.
 `effectList` | True | string | `None` | Only valid for light; for example `[Android, Aurora` (fav list for effects)
+`toggle_entity` | True | string | `None` | Only valid for `input_datetime` (time-only); shows an enable/disable toggle in the datetime popup that acts on this entity (any toggleable domain: `input_boolean`, `switch`, `automation`, ...)
+`subtitle` | True | string | `None` | Only valid for `input_datetime` (time-only); free-text instruction/description line shown in the datetime popup. Usable with or without `toggle_entity`.
 
 
 ## Override Icons or Names
@@ -80,6 +82,19 @@ If you want to display icons from a template you can put them between `<I></I>`
 ```yaml
         icon: 'ha:{{ iif(is_state('light.kitchen', 'on'), '<I>mdi:flashlight</I>', '<I>mdi:flashlight-off</I>') }}'
 ```
+
+## input_datetime popup (set a time from the panel)
+
+```yaml
+entities:
+  - entity: input_datetime.alarm_weekday
+    name: Wake up alarm
+    icon: mdi:alarm
+    subtitle: "Weekdays only"
+    toggle_entity: input_boolean.alarm_weekday_enabled
+```
+
+Only `input_datetime` helpers configured time-only (`has_time: true`, `has_date: false`) get the new time-setting popup; others render as plain text, unchanged.
 
 ## Hide item based on state
 
