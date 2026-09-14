@@ -1097,6 +1097,25 @@ class LuiPagesGen(object):
             label3  = get_translation(self._locale, "frontend.ui.card.timer.actions.finish")
         self._send_mqtt_msg(f"entityUpdateDetail~{entity_id}~~{icon_color}~{entity_id}~{min_remaining}~{sec_remaining}~{editable}~{action1}~{action2}~{action3}~{label1}~{label2}~{label3}", force=is_open_detail)
 
+    def generate_datetime_detail_page(self, entity_id, is_open_detail=False):
+        entity_config = None
+        if entity_id.startswith('uuid'):
+            entity_config = self._config._config_entites_table.get(entity_id)
+            entity = apis.ha_api.get_entity(entity_config.entityId)
+        else:
+            entity = apis.ha_api.get_entity(entity_id)
+        icon_color = self.get_entity_color(entity)
+        hour, minute, _second = entity.state.split(":")
+        toggle_entity_id = ""
+        toggle_state = ""
+        subtitle = ""
+        if entity_config is not None:
+            toggle_entity_id = entity_config.entity_input_config.get("toggle_entity") or ""
+            subtitle = entity_config.entity_input_config.get("subtitle") or ""
+            if toggle_entity_id and apis.ha_api.entity_exists(toggle_entity_id):
+                toggle_state = 1 if apis.ha_api.get_state(toggle_entity_id) == "on" else 0
+        self._send_mqtt_msg(f"entityUpdateDetail~{entity_id}~~{icon_color}~{entity_id}~{int(hour)}~{int(minute)}~{toggle_entity_id}~{toggle_state}~{subtitle}", force=is_open_detail)
+
     def send_message_page(self, ident, heading, msg, b1, b2):
         self._send_mqtt_msg(f"pageType~popupNotify")
         self._send_mqtt_msg(f"entityUpdateDetail~{ident}~{heading}~65535~{b1}~65535~{b2}~65535~{msg}~65535~0")

@@ -186,6 +186,8 @@ class LuiController(object):
                     self._pages_gen.generate_input_select_detail_page(entity)
                 if entity.startswith("timer"):
                     self._pages_gen.generate_timer_detail_page(entity)
+                if entity.startswith("input_datetime"):
+                    self._pages_gen.generate_datetime_detail_page(entity)
             if self._current_card.cardType == "cardThermo":
                 if entity.startswith("climate"):
                     self._pages_gen.generate_thermo_detail_page(entity)
@@ -204,6 +206,8 @@ class LuiController(object):
             self._pages_gen.generate_input_select_detail_page(entity_id, True)
         if detail_type == "popupTimer":
             self._pages_gen.generate_timer_detail_page(entity_id, True)
+        if detail_type == "popupDatetime":
+            self._pages_gen.generate_datetime_detail_page(entity_id, True)
 
     def button_press(self, entity_id, button_type, value):
         #apis.ha_api.log(f"Button Press Event; entity_id: {entity_id}; button_type: {button_type}; value: {value} ")
@@ -456,6 +460,9 @@ class LuiController(object):
             option = entity.attributes['source_list'][int(value)]
             entity.call_service("select_source", source=option)
             
+        if button_type == "datetime-set":
+            apis.ha_api.get_entity(entity_id).call_service("set_datetime", time=f"{value}:00")
+
         # timer detail page
         if button_type == "timer-start":
             if value is not None:
