@@ -187,7 +187,7 @@ class LuiController(object):
                 if entity.startswith("timer"):
                     self._pages_gen.generate_timer_detail_page(entity)
                 if entity.startswith("input_datetime"):
-                    self._pages_gen.generate_datetime_detail_page(entity)
+                    self._pages_gen.generate_datetime_detail_page(res_uuid)
             if self._current_card.cardType == "cardThermo":
                 if entity.startswith("climate"):
                     self._pages_gen.generate_thermo_detail_page(entity)
