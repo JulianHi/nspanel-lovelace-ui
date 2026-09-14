@@ -38,6 +38,7 @@ List of supported entitiy types for this page:
 - button
 - number
 - input_number
+- input_datetime (time-only helper; opens a popup to set the time, e.g. for alarms/automation triggers — see [entities.md](entities.md#input_datetime-popup-set-a-time-from-the-panel))
 - scenes
 - script
 - input_button

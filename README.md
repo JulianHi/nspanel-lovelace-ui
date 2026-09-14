@@ -28,9 +28,10 @@ NsPanel needs to be flashed with Tasmota (or through a 3rd-party Component with 
 
 ## Features
 
-- Entities Page with support for cover, switch, input_boolean, binary_sensor, sensor, button, number, scenes, script, input_button and light, input_text (read-only), lock, fan, timer and automation
-- Grid Page with support for cover, switch, input_boolean, button, scenes, light, lock, timer and automation
+- Entities Page with support for cover, switch, input_boolean, binary_sensor, sensor, button, number, scenes, script, input_button and light, input_text (read-only), lock, fan, timer, input_datetime and automation
+- Grid Page with support for cover, switch, input_boolean, button, scenes, light, lock, timer, input_datetime and automation
 - Detail Pages for Lights (Brightness, Temperature and Color of the Light) and Covers (Position)
+- Popup to set a time on an `input_datetime` helper (e.g. for alarms or automation triggers), with an optional linked enable/disable toggle — **US Portrait only, for now** (see below and [entities.md](docs/entities.md#input_datetime-popup-set-a-time-from-the-panel))
 - Thermostat Page 
 - Media Player Card
 - Alarm Control Card
@@ -38,6 +39,22 @@ NsPanel needs to be flashed with Tasmota (or through a 3rd-party Component with 
 - Card with QrCode to display WiFi Information
 - Localization possible (currently 38 languages)
 - **Everything is dynamically configurable by a yaml config, no need to code or touch Nextion Editor**
+
+### Setting a time (alarms / automation triggers)
+
+```yaml
+    cards:
+      - type: cardEntities
+        title: Alarms
+        entities:
+          - entity: input_datetime.alarm_weekday
+            name: Wake up alarm
+            icon: mdi:alarm
+            subtitle: "Weekdays only"
+            toggle_entity: input_boolean.alarm_weekday_enabled
+```
+
+Tapping the row opens a popup to set the time (24h), with an optional enable/disable toggle if `toggle_entity` is configured. Only works for `input_datetime` helpers configured time-only (`has_time: true`, `has_date: false`); see [entities.md](docs/entities.md#input_datetime-popup-set-a-time-from-the-panel) for the full config reference.
 
 It works with [Tasmota](https://tasmota.github.io/docs/) and MQTT. 
 To control the panel and update it with content from HomeAssistant, there is an [AppDaemon](https://github.com/AppDaemon/appdaemon) App.

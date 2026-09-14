@@ -85,16 +85,24 @@ If you want to display icons from a template you can put them between `<I></I>`
 
 ## input_datetime popup (set a time from the panel)
 
+Full example, one `input_datetime` with a linked enable/disable toggle and one without:
+
 ```yaml
-entities:
-  - entity: input_datetime.alarm_weekday
-    name: Wake up alarm
-    icon: mdi:alarm
-    subtitle: "Weekdays only"
-    toggle_entity: input_boolean.alarm_weekday_enabled
+    cards:
+      - type: cardEntities
+        title: Alarms
+        entities:
+          - entity: input_datetime.alarm_weekday
+            name: Wake up alarm
+            icon: mdi:alarm
+            subtitle: "Weekdays only"
+            toggle_entity: input_boolean.alarm_weekday_enabled
+          - entity: input_datetime.watering_time
+            name: Garden watering
+            icon: mdi:sprinkler
 ```
 
-Only `input_datetime` helpers configured time-only (`has_time: true`, `has_date: false`) get the new time-setting popup; others render as plain text, unchanged.
+Only `input_datetime` helpers configured time-only (`has_time: true`, `has_date: false`) get the new time-setting popup; others render as plain text, unchanged. `toggle_entity` and `subtitle` are both optional and independent of each other — the second entity above has neither, and just gets a plain time-setting popup with no toggle row or subtitle line.
 
 ## Hide item based on state
 
