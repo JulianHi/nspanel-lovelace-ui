@@ -1,5 +1,7 @@
 # NSPanel Lovelace UI
 
+> **Note:** This is a fork of [joBr99/nspanel-lovelace-ui](https://github.com/joBr99/nspanel-lovelace-ui) that adds a new popup for setting the time on a Home Assistant `input_datetime` helper (e.g. for alarms or automation triggers). At the moment only the **US Portrait (US-P)** Nextion firmware has been updated to support this — the datetime popup is not yet available on the EU or other US/landscape firmware variants.
+
 If you like this project consider buying me a pizza 🍕 <a href="https://paypal.me/joBr99" target="_blank"><img src="https://img.shields.io/static/v1?logo=paypal&label=&message=donate&color=slategrey"></a>
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
