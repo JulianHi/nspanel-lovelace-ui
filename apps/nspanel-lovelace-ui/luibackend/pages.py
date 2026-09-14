@@ -386,6 +386,10 @@ class LuiPagesGen(object):
         elif entityType == "timer":
             entityTypePanel = "timer"
             value = get_translation(self._locale, f"backend.component.timer.state._.{entity.state}")
+        elif entityType == "input_datetime":
+            if entity.attributes.get("has_time") and not entity.attributes.get("has_date"):
+                entityTypePanel = "datetime"
+                value = entity.state
         elif entityType == "weather":
             entityTypePanel = "text"
             unit = get_attr_safe(entity, "temperature_unit", "")
@@ -446,7 +450,7 @@ class LuiPagesGen(object):
         if self._locale == "he_IL" and any("\u0590" <= c <= "\u05EA" for c in name):
             name = name[::-1]
         # use uuid instead for some types and probably expand on this in future
-        if entityType in ["light"]:
+        if entityType in ["light", "input_datetime"]:
             entityId = uuid
         # remove stuff defined in mask
         if mask is not None:
