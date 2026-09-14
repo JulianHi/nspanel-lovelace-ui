@@ -111,6 +111,11 @@ def handle_buttons(entity_id, btype, value, entity_config=None, action_context=N
                 call_ha_service(entity_id, "start", service_data=service_data, action_context=action_context)
             else:
                 call_ha_service(entity_id, "start", action_context=action_context)
+        case 'datetime-set':
+            service_data = {
+                "time": f"{value}:00"
+            }
+            call_ha_service(entity_id, "set_datetime", service_data=service_data, action_context=action_context)
         case 'positionSlider':
             service_data = {
                 "position": int(value)
