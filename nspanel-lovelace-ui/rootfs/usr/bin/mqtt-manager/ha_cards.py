@@ -715,7 +715,7 @@ def card_factory(locale, settings, panel):
             return "NotImplemented", None
     return card.iid, card
 
-def detail_open(locale, detail_type, ha_entity_id, entity_id, msg_out_queue, sendTopic=None, options_list=None):
+def detail_open(locale, detail_type, ha_entity_id, entity_id, msg_out_queue, sendTopic=None, options_list=None, toggle_entity=None, subtitle=None):
     data = libs.home_assistant.get_entity_data(ha_entity_id)
     if data:
         state = data.get("state")
@@ -896,6 +896,16 @@ def detail_open(locale, detail_type, ha_entity_id, entity_id, msg_out_queue, sen
             options = "?".join(options)
             return f"{entity_id}~~{icon_color}~{hatype}~{state}~{options}~"
 
+
+        case 'popupDatetime' | 'input_datetime':
+            icon_color = ha_colors.get_entity_color("input_datetime", state, attributes)
+            hour, minute, _second = state.split(":")
+            toggle_entity_id = toggle_entity or ""
+            toggle_state = ""
+            if toggle_entity_id:
+                toggle_data = libs.home_assistant.get_entity_data(toggle_entity_id)
+                toggle_state = 1 if toggle_data and toggle_data.get("state") == "on" else 0
+            return f'{entity_id}~~{icon_color}~{entity_id}~{int(hour)}~{int(minute)}~{toggle_entity_id}~{toggle_state}~{subtitle or ""}'
 
         case 'popupTimer' | 'timer':
             icon_color = ha_colors.get_entity_color("timer", state, attributes)

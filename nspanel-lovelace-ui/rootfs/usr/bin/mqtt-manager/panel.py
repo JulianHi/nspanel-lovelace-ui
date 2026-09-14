@@ -138,23 +138,27 @@ class LovelaceUIPanel:
 
             # send update for detail popup in case it's open
             etype = entity_id.split('.')[0]
-            if etype in ['light', 'timer', 'cover', 'input_select', 'select', 'fan', 'climate']:
+            if etype in ['light', 'timer', 'cover', 'input_select', 'select', 'fan', 'climate', 'input_datetime']:
                 # figure out iid of entity
                 entity_id_iid = ""
+                effectList = None
+                toggle_entity = None
+                subtitle = None
                 for e in self.current_card.entities:
                     if entity_id == e.entity_id:
                         entity_id_iid = f'iid.{e.iid}'
-
-                    effectList = None
-                    if etype=="light":
-                        effectList = e.config.get("effectList")
+                        if etype=="light":
+                            effectList = e.config.get("effectList")
+                        if etype=="input_datetime":
+                            toggle_entity = e.config.get("toggle_entity")
+                            subtitle = e.config.get("subtitle")
                 if etype == 'light':
                     libs.panel_cmd.entityUpdateDetail2(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], "popupInSel", entity_id, entity_id_iid, self.msg_out_queue, sendTopic=self.sendTopic, options_list=effectList))
                     libs.panel_cmd.entityUpdateDetail(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], "popupLight", entity_id, entity_id_iid, self.msg_out_queue, sendTopic=self.sendTopic))
                 elif etype in ['input_select', 'media_player']:
                     libs.panel_cmd.entityUpdateDetail2(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], etype, entity_id, entity_id_iid, self.msg_out_queue, sendTopic=self.sendTopic))
                 else:
-                    libs.panel_cmd.entityUpdateDetail(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], etype, entity_id, entity_id_iid, self.msg_out_queue, sendTopic=self.sendTopic))
+                    libs.panel_cmd.entityUpdateDetail(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], etype, entity_id, entity_id_iid, self.msg_out_queue, sendTopic=self.sendTopic, toggle_entity=toggle_entity, subtitle=subtitle))
 
         involved_entities = ha_control.calculate_dim_values(
             self.settings.get("sleepTracking"),
@@ -326,6 +330,8 @@ class LovelaceUIPanel:
                     return
                 entity_id = msg[3]
                 effectList = None
+                toggle_entity = None
+                subtitle = None
                 # replace iid with real entity id
                 if entity_id.startswith("iid."):
                     iid = entity_id.split(".")[1]
@@ -334,9 +340,12 @@ class LovelaceUIPanel:
                             entity_id = e.entity_id
                             if entity_id.startswith("light"):
                                 effectList = e.config.get("effectList")
+                            if entity_id.startswith("input_datetime"):
+                                toggle_entity = e.config.get("toggle_entity")
+                                subtitle = e.config.get("subtitle")
                 if msg[2] == "popupInSel": #entity_id.split(".")[0] in ['input_select', 'media_player']:
                     libs.panel_cmd.entityUpdateDetail2(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], msg[2], entity_id, msg[3], self.msg_out_queue, sendTopic=self.sendTopic, options_list=effectList))
                 else:
-                    libs.panel_cmd.entityUpdateDetail(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], msg[2], entity_id, msg[3], self.msg_out_queue, sendTopic=self.sendTopic))
+                    libs.panel_cmd.entityUpdateDetail(self.msg_out_queue, self.sendTopic, detail_open(self.settings["locale"], msg[2], entity_id, msg[3], self.msg_out_queue, sendTopic=self.sendTopic, toggle_entity=toggle_entity, subtitle=subtitle))
 
 
